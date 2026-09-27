@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>纸上逻辑 Nikoli · 环线 —— 圈环 / 珍珠 / 箭头 / 数桥</title>
+<meta name="description" content="四种点阵推理谜题：圈环、珍珠、箭头、数桥。画的是边不是格，每道题都由唯一解生成器出题，提示来自真求解器。">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#f4efe3">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="css/game.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f4efe3'/%3E%3Cg fill='%231f6f5c'%3E%3Crect x='6' y='6' width='7' height='7' rx='1.5'/%3E%3Crect x='19' y='6' width='7' height='7' rx='1.5'/%3E%3Crect x='6' y='19' width='7' height='7' rx='1.5'/%3E%3C/g%3E%3C/svg%3E">
+</head>
+<body>
+<div id="app">
+
+  <header id="topbar">
+    <button class="brand" data-action="home" aria-label="回到首页">
+      <span class="brand-mark">▦</span>
+      <span class="brand-text">
+        <b>纸上逻辑</b>
+        <i>NIKOLI</i>
+      </span>
+    </button>
+    <div class="topbar-right">
+      <span id="streak-chip" class="chip" title="连续做每日挑战的天数">— 天</span>
+      <button class="icon" data-action="toggle-sound" id="sound-btn" aria-label="声音">♪</button>
+      <button class="icon" data-action="settings" aria-label="设置">⋯</button>
+    </div>
+  </header>
+
+  <main id="stage">
+
+    <!-- ── 首页 ───────────────────────────────────────────────── -->
+    <section id="home" class="screen">
+      <div class="scroll">
+        <article id="daily" class="card daily">
+          <div class="daily-head">
+            <div>
+              <h2>今日挑战</h2>
+              <p class="muted" id="daily-date">—</p>
+            </div>
+            <div class="daily-count"><b id="daily-done">0</b><span>/4</span></div>
+          </div>
+          <div class="daily-row" id="daily-row"></div>
+          <p class="muted tiny">同一天的题面全世界一样：题面由日期算出的种子决定。</p>
+        </article>
+
+        <div id="kinds" class="kind-grid"></div>
+
+        <article class="card stats">
+          <div class="stat"><b id="stat-solves">0</b><span>解出</span></div>
+          <div class="stat"><b id="stat-nohint">0</b><span>无提示</span></div>
+          <div class="stat"><b id="stat-hints">0</b><span>用过提示</span></div>
+          <div class="stat"><b id="stat-streak">0</b><span>连续天数</span></div>
+        </article>
+
+        <button class="textlink" data-action="howto-global">四种玩法的规则说明 →</button>
+      </div>
+    </section>
+
+    <!-- ── 对局 ───────────────────────────────────────────────── -->
+    <section id="play" class="screen" hidden>
+      <div class="playbar">
+        <button class="ghost" data-action="home" aria-label="返回">‹ 首页</button>
+        <div class="playbar-title">
+          <b id="play-title">圈环</b>
+          <i id="play-size">5×5</i>
+        </div>
+        <div class="playbar-right">
+          <span id="play-timer" class="mono">0:00</span>
+        </div>
+      </div>
+
+      <div id="board-wrap">
+        <canvas id="board"></canvas>
+        <div id="flash" class="flash" hidden></div>
+      </div>
+
+      <div class="statusline">
+        <div class="progress"><i id="progress-bar"></i></div>
+        <span id="status-text" class="muted mono">0 / 0</span>
+      </div>
+
+      <div class="controls">
+        <div class="tool-toggle" id="tool-toggle" role="group" aria-label="笔">
+          <button data-tool="0" class="on"><span id="tool-primary">主笔</span></button>
+          <button data-tool="1"><span id="tool-secondary">副笔</span></button>
+        </div>
+        <div class="spacer"></div>
+        <button class="ctl" data-action="undo" title="撤销 (Z)">↺</button>
+        <button class="ctl" data-action="redo" title="重做 (Shift+Z)">↻</button>
+        <button class="ctl hint" data-action="hint" title="提示 (H)">提示 <b id="hint-count">0</b></button>
+        <button class="ctl" data-action="restart" title="重来 (R)">重启</button>
+      </div>
+      <p class="hint-note" id="hint-note"></p>
+    </section>
+
+    <!-- ── 结算 ───────────────────────────────────────────────── -->
+    <section id="result" class="screen" hidden>
+      <div class="scroll">
+        <article class="card result">
+          <div class="result-mark" id="result-mark">✦</div>
+          <h2 id="result-title">解开了</h2>
+          <p class="muted" id="result-sub"></p>
+          <div class="stars" id="result-stars"><i>★</i><i>★</i><i>★</i></div>
+          <dl class="result-rows" id="result-rows"></dl>
+          <div class="result-actions">
+            <button class="primary" data-action="next">下一题 →</button>
+            <button class="ghost" data-action="replay">再做这题</button>
+            <button class="ghost" data-action="home">回首页</button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+  </main>
+
+  <dialog id="howto">
+    <h3 id="howto-title">怎么玩</h3>
+    <ol id="howto-body"></ol>
+    <form method="dialog"><button class="ghost">知道了</button></form>
+  </dialog>
+
+  <dialog id="settings">
+    <h3>设置</h3>
+    <label class="row"><span>音效</span><input type="checkbox" data-setting="sound" checked></label>
+    <label class="row"><span>减弱动效</span><input type="checkbox" data-setting="reduceMotion"></label>
+    <div class="row"><span>存档</span><div class="row-btns">
+      <button class="ghost" data-action="export">导出</button>
+      <button class="ghost" data-action="import">导入</button>
+      <button class="ghost danger" data-action="reset">清空</button>
+    </div></div>
+    <p class="muted tiny" id="import-box" hidden>
+      把之前导出的字符串粘进来：
+      <textarea id="import-text" rows="3"></textarea>
+      <button class="primary" data-action="import-apply">载入</button>
+    </p>
+    <form method="dialog"><button class="ghost">关闭</button></form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

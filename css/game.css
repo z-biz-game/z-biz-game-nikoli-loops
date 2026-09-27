@@ -1,0 +1,245 @@
+/* 纸上逻辑 —— 一张方格纸的视觉：米黄纸、细格线、墨迹卡片。
+   所有颜色与 js/core/theme.js 里的 token 保持一致（画布画纸上的部分，DOM 画纸下的部分）。 */
+
+:root {
+  --paper: #f4efe3;
+  --paper-deep: #ece5d5;
+  --card: #fbf8f0;
+  --ink: #2b2a26;
+  --ink-soft: #6a655a;
+  --ink-faint: #a9a294;
+  --rule: #cfc7b3;
+  --rule-bold: #9a937f;
+  --accent: #1f6f5c;
+  --accent-soft: #e2efe9;
+  --warn: #b4522f;
+  --good: #2f7d4f;
+  --gold: #c08a2e;
+  --shadow: 0 1px 2px rgba(43, 42, 38, .10), 0 8px 22px -10px rgba(43, 42, 38, .28);
+  --r: 14px;
+  --font: "Songti SC", "Noto Serif SC", Georgia, "Times New Roman", serif;
+  --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  font-family: var(--font);
+  color: var(--ink);
+  background-color: var(--paper);
+  /* 方格纸底纹：细格 12px、粗格 60px，与棋盘格线同一套语汇 */
+  background-image:
+    repeating-linear-gradient(to right, rgba(154, 147, 127, .16) 0 1px, transparent 1px 12px),
+    repeating-linear-gradient(to bottom, rgba(154, 147, 127, .16) 0 1px, transparent 1px 12px),
+    repeating-linear-gradient(to right, rgba(154, 147, 127, .26) 0 1px, transparent 1px 60px),
+    repeating-linear-gradient(to bottom, rgba(154, 147, 127, .26) 0 1px, transparent 1px 60px);
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+#app { display: flex; flex-direction: column; height: 100dvh; max-width: 900px; margin: 0 auto; }
+
+/* ── 顶栏 ───────────────────────────────────────────── */
+#topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
+  gap: 10px;
+}
+.brand { display: flex; align-items: center; gap: 9px; background: none; border: 0; padding: 2px 4px; cursor: pointer; color: inherit; font-family: inherit; }
+.brand-mark { font-size: 20px; color: var(--accent); line-height: 1; }
+.brand-text { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.05; }
+.brand-text b { font-size: 17px; letter-spacing: .04em; }
+.brand-text i { font-size: 9px; letter-spacing: .28em; color: var(--ink-faint); font-style: normal; }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+.chip {
+  font-size: 12px; color: var(--ink-soft); background: var(--card);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 4px 10px; white-space: nowrap;
+}
+.icon {
+  width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--rule);
+  background: var(--card); color: var(--ink-soft); font-size: 15px; cursor: pointer;
+  display: grid; place-items: center; transition: transform .12s ease, color .12s ease;
+}
+.icon:active { transform: scale(.92); }
+.icon.off { color: var(--ink-faint); text-decoration: line-through; }
+
+/* ── 舞台 / 屏幕切换 ─────────────────────────────────── */
+#stage { flex: 1; min-height: 0; position: relative; }
+.screen { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+.screen[hidden] { display: none; }
+.scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 14px calc(20px + var(--safe-b)); display: flex; flex-direction: column; gap: 14px; }
+
+.card {
+  background: var(--card); border: 1px solid var(--rule); border-radius: var(--r);
+  box-shadow: var(--shadow); padding: 14px 16px;
+}
+.muted { color: var(--ink-soft); }
+.tiny { font-size: 11px; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+h2 { margin: 0 0 2px; font-size: 17px; letter-spacing: .02em; }
+p { margin: 0; }
+
+/* ── 每日挑战 ───────────────────────────────────────── */
+.daily { border-color: var(--rule-bold); background:
+  linear-gradient(180deg, var(--accent-soft), var(--card) 62%); }
+.daily-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.daily-head p { font-size: 12px; }
+.daily-count { font-family: var(--mono); color: var(--accent); line-height: 1; }
+.daily-count b { font-size: 26px; }
+.daily-count span { font-size: 13px; opacity: .6; }
+.daily-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 8px; }
+.daily-cell {
+  border: 1px solid var(--rule); background: var(--card); border-radius: 10px;
+  padding: 9px 4px 7px; text-align: center; cursor: pointer; font-family: inherit; color: inherit;
+  transition: transform .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+.daily-cell:hover { transform: translateY(-2px); border-color: var(--rule-bold); box-shadow: var(--shadow); }
+.daily-cell .g { display: block; font-size: 17px; line-height: 1.1; color: var(--accent); }
+.daily-cell .n { display: block; font-size: 12px; margin-top: 3px; }
+.daily-cell .s { display: block; font-size: 10px; color: var(--ink-faint); font-family: var(--mono); }
+.daily-cell.done { background: var(--accent-soft); border-color: var(--accent); }
+.daily-cell.done .g::after { content: ' ✓'; color: var(--accent); }
+
+/* ── 玩法九宫格 ─────────────────────────────────────── */
+.kind-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.kind {
+  position: relative; text-align: left; cursor: pointer; font-family: inherit; color: inherit;
+  background: var(--card); border: 1px solid var(--rule); border-radius: var(--r);
+  box-shadow: var(--shadow); padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.kind:hover { transform: translateY(-3px); }
+.kind-top { display: flex; align-items: baseline; justify-content: space-between; }
+.kind-glyph { font-size: 26px; line-height: 1; }
+.kind-latin { font-family: var(--mono); font-size: 9px; letter-spacing: .16em; color: var(--ink-faint); }
+.kind-name { font-size: 19px; letter-spacing: .06em; }
+.kind-tag { font-size: 11.5px; color: var(--ink-soft); margin-top: 2px; min-height: 2.4em; }
+.kind-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; border-top: 1px dashed var(--rule); padding-top: 8px; }
+.kind-best { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+.kind-sizes { display: flex; flex-wrap: wrap; gap: 4px; }
+.size-chip {
+  font-family: var(--mono); font-size: 11px; padding: 3px 7px; border-radius: 7px;
+  border: 1px solid var(--rule); background: var(--paper); cursor: pointer; color: var(--ink-soft);
+}
+.size-chip:hover { border-color: var(--accent); color: var(--accent); }
+.kind-help { position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-faint); font-size: 12px; cursor: pointer; }
+.kind-help:hover { color: var(--accent); border-color: var(--accent); }
+
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; gap: 6px; }
+.stat b { display: block; font-size: 20px; font-family: var(--mono); color: var(--accent); }
+.stat span { font-size: 11px; color: var(--ink-soft); }
+.textlink { background: none; border: 0; color: var(--ink-soft); font-family: inherit; font-size: 13px; text-align: center; cursor: pointer; padding: 4px; }
+.textlink:hover { color: var(--accent); }
+
+/* ── 对局 ───────────────────────────────────────────── */
+#play { padding: 0 10px calc(10px + var(--safe-b)); gap: 8px; }
+.playbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 2px 0; }
+.playbar-title { display: flex; align-items: baseline; gap: 8px; }
+.playbar-title b { font-size: 17px; letter-spacing: .05em; }
+.playbar-title i { font-style: normal; font-family: var(--mono); font-size: 12px; color: var(--ink-faint); }
+#play-timer { font-size: 14px; color: var(--ink-soft); }
+
+#board-wrap {
+  position: relative; flex: 1; min-height: 0; display: grid; place-items: center;
+  border: 1px solid var(--rule); border-radius: var(--r); background: var(--paper-deep);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6);
+  overflow: hidden;
+}
+#board { display: block; touch-action: none; cursor: crosshair; border-radius: var(--r); }
+
+.flash {
+  position: absolute; inset: 0; pointer-events: none; border-radius: var(--r);
+  background: radial-gradient(120% 120% at 50% 50%, rgba(47,125,79,.20), rgba(47,125,79,0) 70%);
+  animation: flash .9s ease-out forwards;
+}
+@keyframes flash { from { opacity: 0; transform: scale(.96); } 22% { opacity: 1; } to { opacity: 0; transform: scale(1.02); } }
+
+.statusline { display: flex; align-items: center; gap: 10px; padding: 0 2px; }
+.progress { flex: 1; height: 5px; border-radius: 999px; background: var(--paper-deep); border: 1px solid var(--rule); overflow: hidden; }
+.progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), #4aa383); transition: width .22s ease; }
+#status-text { font-size: 11.5px; white-space: nowrap; }
+
+.controls { display: flex; align-items: center; gap: 7px; }
+.spacer { flex: 1; }
+.ctl {
+  font-family: inherit; font-size: 13px; color: var(--ink); background: var(--card);
+  border: 1px solid var(--rule); border-radius: 10px; padding: 9px 12px; min-width: 44px; cursor: pointer;
+  box-shadow: 0 1px 0 rgba(43,42,38,.06); transition: transform .1s ease, opacity .12s ease;
+}
+.ctl:active { transform: translateY(1px); }
+.ctl[disabled] { opacity: .35; cursor: default; }
+.ctl.hint { border-color: var(--accent); color: var(--accent); }
+.ctl.hint b { font-family: var(--mono); font-size: 11px; opacity: .7; margin-left: 2px; }
+
+.tool-toggle { display: flex; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--paper); }
+.tool-toggle[hidden] { display: none; }
+.tool-toggle button { font-family: inherit; font-size: 12.5px; border: 0; background: none; color: var(--ink-soft); padding: 9px 12px; cursor: pointer; }
+.tool-toggle button.on { background: var(--ink); color: var(--paper); }
+.hint-note { font-size: 11.5px; color: var(--gold); min-height: 1.3em; margin: -2px 2px 0; }
+
+.ghost { background: none; border: 1px solid var(--rule); border-radius: 9px; padding: 8px 11px; font-family: inherit; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
+.ghost:hover { color: var(--ink); border-color: var(--rule-bold); }
+.ghost.danger { color: var(--warn); border-color: rgba(180, 82, 47, .4); }
+.primary {
+  background: var(--ink); color: var(--paper); border: 0; border-radius: 10px; padding: 11px 16px;
+  font-family: inherit; font-size: 14.5px; letter-spacing: .04em; cursor: pointer; box-shadow: var(--shadow);
+}
+.primary:hover { background: #1d1c19; }
+
+/* ── 结算 ───────────────────────────────────────────── */
+.result { text-align: center; padding: 22px 18px; }
+.result-mark { font-size: 30px; color: var(--gold); }
+.result h2 { font-size: 22px; margin-top: 4px; letter-spacing: .06em; }
+.stars { font-size: 22px; color: var(--rule); letter-spacing: .12em; margin: 8px 0 2px; }
+.stars i { font-style: normal; }
+.stars i.on { color: var(--gold); }
+.result-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 14px 0 18px; text-align: left; font-size: 13px; }
+.result-rows div { display: flex; justify-content: space-between; border-bottom: 1px dashed var(--rule); padding-bottom: 4px; }
+.result-rows dt { color: var(--ink-soft); }
+.result-rows dd { margin: 0; font-family: var(--mono); }
+.result-rows dd.best { color: var(--accent); font-weight: 600; }
+.result-actions { display: flex; flex-direction: column; gap: 8px; }
+
+/* ── 抽屉 / 提示 ────────────────────────────────────── */
+dialog {
+  border: 1px solid var(--rule-bold); border-radius: var(--r); background: var(--card);
+  padding: 18px 20px 16px; max-width: 420px; width: calc(100vw - 40px); color: var(--ink);
+  box-shadow: 0 20px 50px -20px rgba(43,42,38,.5); font-family: inherit;
+}
+dialog::backdrop { background: rgba(43, 42, 38, .34); }
+dialog h3 { margin: 0 0 10px; font-size: 17px; }
+dialog ol { margin: 0 0 14px; padding-left: 20px; font-size: 13.5px; line-height: 1.75; }
+dialog .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--rule); font-size: 13.5px; }
+dialog .row:last-of-type { border-bottom: 0; }
+dialog .row-btns { display: flex; gap: 6px; }
+dialog textarea { width: 100%; font-family: var(--mono); font-size: 11px; margin-top: 6px; }
+input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(28px + var(--safe-b)); transform: translateX(-50%) translateY(10px);
+  background: var(--ink); color: var(--paper); font-size: 13px; padding: 9px 15px; border-radius: 999px;
+  box-shadow: var(--shadow); opacity: 0; transition: opacity .2s ease, transform .2s ease; pointer-events: none; z-index: 40;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ── 宽屏：首页两列 ─────────────────────────────────── */
+@media (min-width: 640px) {
+  .kind-grid { grid-template-columns: repeat(2, 1fr); }
+  /* 棋盘那一行必须由容器给出确定高度。用 flex 排：board-wrap 独占一行，而这一行的交叉轴
+     尺寸又是内容撑出来的 —— layout() 把画布放大 → wrap 变高 → ResizeObserver 重排 →
+     画布更大，一路涨到被宽度卡住。改成 grid，minmax(0,1fr) 只跟容器要高度、不跟画布要。
+     选择器带上 :not([hidden])：#play 的 id 权重压得过 .screen[hidden]{display:none}。 */
+  #play:not([hidden]) {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
