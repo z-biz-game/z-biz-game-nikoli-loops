@@ -293,10 +293,11 @@ function assign(state, model, k, val) {
 // 推到不动点；返回 false 表示这盘墨迹与题面矛盾。
 // 用的每一条都必须"砍不掉任何真解"，否则唯一性证明就是假的：
 //   · 缺口为 0 → 其余道全封。
-//   · 每条道有个上限 cap：默认 2；哪座端点岛只剩一个桥头，这条道就搭不起第二根
-//     （"数字 1 的岛挂不起双桥"是它的推论）。缺口正好等于各道 cap 之和 → 每道顶到上限。
+//   · 每条道有个余量 cap：未定的道最多 2；已经搭了一根的道还能再吃一根（→双桥）；
+//     哪座端点岛只剩一个桥头，它名下未定的道就搭不起第二根（"数字 1 的岛挂不起双桥"是推论）。
+//   · 缺口正好等于各道余量之和 → 每道都顶到余量：未定的顶到 cap，单桥的长成双桥。
 //     注意：缺口等于剩下的道数**不**能定案 —— 3 个缺口摊在 3 条道上还可以是 2+1+0。
-//   · 缺口超过 cap 之和 → 矛盾。
+//   · 缺口超过余量之和 → 矛盾。
 //   · 一条道搭上桥，与它十字相交的道全封；两边都搭上 → 矛盾。
 //     道定成双桥把两端其余道全封，就是"缺口归零 → 全封"这条规则的下一轮产物。
 //   · 数字被藏起来的岛也归连通性管：它所有道都封死 = 孤岛，矛盾。
@@ -306,42 +307,61 @@ export function propagate(state, specOrModel) {
   const g = model.geom;
   const clue = model.clue;
   const L = g.lanes.length;
-  const cap = new Int8Array(L);
+  // 这座岛此刻还欠几个桥头。必须现算：这一轮的赋值会改到邻岛共用的那条道，
+  // 拿轮首缓存的缺口去判下一条规则，会把可满足的盘面说成矛盾（countSolutions 交出 0 个解）。
+  const needAt = (p) => {
+    const want = clue[p];
+    if (want < 0) return -1;                            // 藏了数字的岛没有缺口这回事
+    const ls = g.islandLanes[p];
+    let sum = 0;
+    for (let t = 0; t < ls.length; t++) {
+      const v = state[ls[t]];
+      if (v !== UNKNOWN) sum += v;
+    }
+    return want - sum;
+  };
+  // 这根单桥还长得出第二根：两端此刻都还欠着桥头。有一端已经凑齐数字，这根就封顶了。
+  const mayGrow = (k) => {
+    const lane = g.lanes[k];
+    return needAt(lane.a) !== 0 && needAt(lane.b) !== 0;
+  };
+  // 一条未定的道最多还能扛几根桥头（同样现算，端点凑齐了就是 0）
+  const capOf = (k) => {
+    const lane = g.lanes[k];
+    let c = 2;
+    for (const p of [lane.a, lane.b]) {
+      const nd = needAt(p);
+      if (nd === 0) return 0;
+      if (nd === 1) c = 1;                              // 只剩一个桥头：谁也别想搭双
+    }
+    return c;
+  };
   let changed = true;
   while (changed) {
     changed = false;
-    cap.fill(2);
     for (let p = 0; p < g.K; p++) {
-      const want = clue[p];
       const ls = g.islandLanes[p];
-      if (want < 0) {
+      if (clue[p] < 0) {
         if (g.K > 1 && ls.every((k) => state[k] === CLOSED)) return false;
         continue;
       }
-      let sum = 0;
-      for (let t = 0; t < ls.length; t++) {
-        const v = state[ls[t]];
-        if (v !== UNKNOWN) sum += v;
-      }
-      const need = want - sum;
-      if (need < 0) return false;                       // 桥头数已经超了证词
-      if (need === 1) {                                 // 只剩一个桥头：谁也别想搭双
-        for (let t = 0; t < ls.length; t++) if (state[ls[t]] === UNKNOWN) cap[ls[t]] = 1;
-      }
+      if (needAt(p) < 0) return false;                  // 桥头数已经超了证词
     }
     for (let p = 0; p < g.K; p++) {
-      const want = clue[p];
-      if (want < 0) continue;
+      if (clue[p] < 0) continue;                        // 藏了数字的岛不归这里管
+      const need = needAt(p);
       const ls = g.islandLanes[p];
-      let sum = 0;
       let room = 0;
       let unk = 0;
       for (let t = 0; t < ls.length; t++) {
         const k = ls[t];
         const v = state[k];
-        if (v === UNKNOWN) { unk++; room += cap[k]; } else sum += v;
+        // 单桥不是终局：把"还能再加一根"漏掉，等于把画到一半的双桥当成填不满缺口的矛盾，
+        // solveOne 带着这种合法墨迹直接返回 null，提示跟着哑火。
+        if (v === UNKNOWN) { unk++; room += capOf(k); }
+        else if (v === SINGLE && mayGrow(k)) room += 1;
       }
-      const need = want - sum;
+      if (need < 0) return false;
       if (need === 0) {
         if (!unk) continue;
         for (let t = 0; t < ls.length; t++) {
@@ -351,12 +371,18 @@ export function propagate(state, specOrModel) {
         continue;
       }
       if (need > room) return false;                     // 剩下的道填不满缺口
-      if (need === room && unk) {
+      if (need === room) {                               // 每道余量都得顶满，一颗不剩
         for (let t = 0; t < ls.length; t++) {
           const k = ls[t];
-          if (state[k] !== UNKNOWN) continue;
-          if (!assign(state, model, k, cap[k])) return false;
-          changed = true;
+          if (state[k] === UNKNOWN) {
+            const c = capOf(k);
+            if (c === 0) { if (!assign(state, model, k, CLOSED)) return false; changed = true; }
+            else if (!assign(state, model, k, c === 1 ? SINGLE : DOUBLE)) return false;
+            else changed = true;
+          } else if (state[k] === SINGLE && mayGrow(k)) {
+            state[k] = DOUBLE;
+            changed = true;
+          }
         }
       }
     }
@@ -437,11 +463,30 @@ function sealedOff(state, model) {
 function expandSearch(model, spec, cap, budget, seedState) {
   const g = model.geom;
   const L = g.lanes.length;
+  // 这根桥还长得出第二根：两端数字不是 1（1 的岛挂不起双桥）。
+  // 剩下的账（超数、十字相交、孤岛）交给 propagate 在下一层去算，这里只挡明显白跑的分支。
+  const canGrow = (k) => {
+    const lane = g.lanes[k];
+    return model.clue[lane.a] !== 1 && model.clue[lane.b] !== 1;
+  };
   let found = 0;
   let nodes = 0;
   let truncated = false;
+  // 只有"玩家亲手拖上去的那一根"还留着长双桥的余地。搜索自己定下的 SINGLE 已经是
+  // 这一支的结论，再替它开生长分支会把同一个解从两条路径上数两遍 —— 唯一解题立刻被误判成多解。
+  const inked = new Uint8Array(L);
+  if (seedState) for (let k = 0; k < L; k++) if (seedState[k] === SINGLE) inked[k] = 1;
   const states = [];
-  const walk = (st) => {
+  // 两条搜索路径可能收敛到同一个终局（把一根道定成单桥，传播再替它长成双桥，
+  // 与直接定成双桥是同一个盘面）。数解数的是"解的种类"，不是走到叶子的路径条数 ——
+  // 不去重的话唯一解会被数成多解，出题闸门就把好题面全拒了。
+  const seen = new Set();
+  const keyOf = (st) => {
+    let s = '';
+    for (let k = 0; k < L; k++) s += String.fromCharCode(st[k] + 5);
+    return s;
+  };
+  const walk = (st, from) => {
     if (found >= cap) return;
     if (++nodes > budget) { truncated = true; return; }
     if (!propagate(st, model)) return;
@@ -449,8 +494,22 @@ function expandSearch(model, spec, cap, budget, seedState) {
     if (pick < 0) {
       const list = bridgeListOf(g, st);
       if (list.length && validate(spec, list)) {
-        found++;
-        if (states.length < cap) states.push(Int8Array.from(st));
+        const key = keyOf(st);
+        if (!seen.has(key)) {
+          seen.add(key);
+          found++;
+          if (states.length < cap) states.push(Int8Array.from(st));
+        }
+      }
+      // 墨迹里的单桥是"至少一根"而不是"只许一根"：答案要双桥时，玩家先拖了一根
+      // 是合法局面。把它当封顶，solveOne 带着这种墨迹返回 null，提示就地哑火。
+      // 从 from 往后开分支，保证同一堆生长组合只被走一遍。
+      for (let k = from; k < L; k++) {
+        if (!inked[k] || st[k] !== SINGLE || !canGrow(k)) continue;
+        if (found >= cap) return;
+        const next = Int8Array.from(st);
+        next[k] = DOUBLE;
+        walk(next, k + 1);
       }
       return;
     }
@@ -461,10 +520,10 @@ function expandSearch(model, spec, cap, budget, seedState) {
       const next = Int8Array.from(st);
       next[pick] = val;
       if (sealedOff(next, model)) continue;
-      walk(next);
+      walk(next, 0);
     }
   };
-  walk(seedState ? Int8Array.from(seedState) : new Int8Array(L).fill(UNKNOWN));
+  walk(seedState ? Int8Array.from(seedState) : new Int8Array(L).fill(UNKNOWN), 0);
   return { count: found, capped: truncated || found >= cap, states, nodes };
 }
 
@@ -767,6 +826,10 @@ function tryBoard(rng, n, m, gate, budget) {
   if (!thinned) return null;
   const spec = finishSpec(base, thinned.clues);
   const audit = countSolutions(spec, 2);               // 交卷前再数一次：唯一性必须是数完的
+  // 把审计结果随题面交出去：下游（测试、UI 的"这题有人担保过"角标）不必再数一遍，
+  // 也不必猜 —— capped 为真就意味着"没数完"，谁拿到都得自己决定信不信。
+  spec.count = audit.count;
+  spec.capped = audit.capped;
   if (audit.count !== 1 || audit.capped) return null;
   if (!validate(spec, spec.bridges)) return null;      // 求解器与校验器对不上，说明有人撒谎
   return spec;
@@ -861,7 +924,7 @@ export function create(spec) {
     c: Array.from(count), k: Array.from(closed), f: Array.from(full),
   });
   const back = (h) => {
-    count.set(h.c); closed.set(h.k); full.set(h.f); dirty = true;
+    count.set(h.c); closed.set(h.k); full.set(h.f); dirty = true; badStale = true;
   };
   const remember = () => { history.push(snap()); if (history.length > 800) history.shift(); future.length = 0; };
 

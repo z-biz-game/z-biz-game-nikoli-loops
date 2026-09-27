@@ -574,18 +574,20 @@ function contract(path, n, m, k, ti, tj) {
 // 所以形状要靠"鼓到一半再收回来"来回抖，才有足够的可放珠位置；这也是下面按候选数挑形状的原因。
 export function randomLoop(rng, n, m, maxLen, minLen = 12) {
   const target = rng.range(Math.max(minLen, Math.round(maxLen * 0.66)), maxLen);
-  // 起点就得够大：随机走一步只挪 ±2 格，从一个四格小环爬不到 24 —— 以前 10×10 的
-  // "挑战"十道里有九道是这么掉回 handBuilt 那道 12 格回字的，档位也就白分了。
+  // 起步只看"放得下、不超上限"：以前还要求起步那条回字环本身就 ≥ minLen，于是 8×8 上想滚
+  // 40 格的环压根找不到合法起步（回字环最长 28），整条随机走直接返回 null。偏偏高填充率的环
+  // 才是唯一性最好求的那一批 —— 长环把盘面挤满，珠子的规则才没有余地让第二条环偷偷换轨。
   const perim = (w, h) => 2 * (w + h) - 4;
   let startW = 0;
   let startH = 0;
   for (let k = 0; k < 24 && !startW; k++) {
-    const w = rng.range(2, Math.max(2, Math.min(n, Math.floor((maxLen + 4) / 2) - 2)));
-    const hLo = Math.max(2, Math.ceil((minLen + 4) / 2) - w);
-    const hHi = Math.min(m, Math.floor((target + 4) / 2) - w);
-    if (hLo > hHi) continue;
-    const h = rng.range(hLo, hHi);
-    if (perim(w, h) < minLen || perim(w, h) > maxLen) continue;
+    const wCap = Math.min(n, Math.floor((maxLen + 4) / 2) - 3);
+    if (wCap < 3) continue;
+    const w = rng.range(3, wCap);
+    const hCap = Math.min(m, Math.floor((maxLen + 4) / 2) - w);
+    if (hCap < 3) continue;
+    const h = rng.range(3, hCap);
+    if (perim(w, h) > maxLen) continue;
     startW = w;
     startH = h;
   }
@@ -594,7 +596,7 @@ export function randomLoop(rng, n, m, maxLen, minLen = 12) {
   const y = rng.int(m - startH + 1);
   let path = ringPath(n, x, y, startW, startH);
   if (!isCycle(path, n, m)) return null;
-  const steps = rng.range(36, 80);
+  const steps = rng.range(target, target * 2);
   for (let s = 0; s < steps; s++) {
     const L = path.length;
     const grow = L < target || L <= minLen;
@@ -642,54 +644,76 @@ export function pearlCandidates(path, n, m) {
 export { isCycle };
 const eligiblePearls = pearlCandidates;
 
-function makeSpec(n, m, path, pearls) {
+// rng 给了就随种子换起手：同一条环从哪颗珠开始数都合法，但"环上第一颗珠"对回字环永远是那个角，
+// 十二道题挤在三个起手格上 —— 每日一题连着一周从同一个角下笔，是玩家看得出来的单调。
+function makeSpec(n, m, path, pearls, rng = null) {
   const solution = path.map((c) => halfOfCell(n, c));
   const pearlCells = new Set(pearls.map(([i, j]) => i + j * n));
-  let s = 0;
-  for (let k = 0; k < path.length; k++) if (pearlCells.has(path[k])) { s = k; break; }
+  const anchors = [];
+  for (let k = 0; k < path.length; k++) if (pearlCells.has(path[k])) anchors.push(k);
+  const s = anchors.length > 1 && rng ? anchors[rng.int(anchors.length)] : (anchors[0] ?? 0);
   const stroke = path.slice(s).concat(path.slice(0, s)).map((c) => halfOfCell(n, c));
   return { n, m, pearls, solution, stroke, par: solution.length };
 }
 
-// 贪心删珠：删掉之后仍然唯一才删。gate 为纯逻辑时便宜得多，能推完就直接用它。
+// 贪心删珠：删掉之后题面仍然成立才删。"仍然成立"有两种证法，贵的那条留到不得已在用：
+//   · 满珠盘一遍传播就推到底 —— 这条推理链本身就是唯一性证明，于是删珠的每一步复核也只跑一遍传播；
+//   · 推不完才去数解（数到 2 早停；没数完一律算不唯一）。
+// 顺序很要紧：先数解会把 8×8 上"推得完但数不完"的好盘全挡在门外 —— 实测满珠盘能一遍推完的环
+// 6×6 占 34%、7×7 占 24%、8×8 占 8%，而这些盘在 7×7 以上跑 countSolutions 几乎必然撑爆预算。
 function minePearls(rng, n, m, path, budget) {
   const all = eligiblePearls(path, n, m);
   if (all.length < 2) return null;
   const keep = all.map(() => true);
   const setOf = () => all.filter((_, t) => keep[t]);
+  const specOf = (pearls, r = null) => makeSpec(n, m, path, pearls, r);
   const probe = (pearls) => {
-    const spec = makeSpec(n, m, path, pearls);
+    const spec = specOf(pearls);
     const { count, capped } = countSolutions(spec, 2);
     return { spec, unique: count === 1 && !capped, count, capped };
   };
-  const first = probe(setOf());
-  if (!first.unique) return null;                              // 满珠都不唯一，这根环就别想出题
-  let calls = 1;
-  const logic = logicSolve(first.spec);
-  if (logic) {                                                  // 纯逻辑就推得完：只在"删完还能推完"里挑
+  const full = specOf(all);
+  const derivable = !!logicSolve(full);
+  if (!derivable && !probe(all).unique) return null;             // 满珠盘都有第二种走法，这根环出题不了
+  let calls = derivable ? 0 : 1;
+  if (derivable) {
     for (const idx of rng.shuffle(all.map((_, i) => i))) {
       if (calls > budget) break;
       keep[idx] = false;
-      if (!logicSolve(makeSpec(n, m, path, setOf()))) keep[idx] = true;
+      if (!logicSolve(specOf(setOf()))) keep[idx] = true;
       else calls++;
     }
-  } else {
-    for (const idx of rng.shuffle(all.map((_, i) => i))) {
-      if (calls > budget) break;
-      const trial = keep.slice();
-      trial[idx] = false;
-      const pearls = all.filter((_, t) => trial[t]);
-      if (pearls.length < 2) continue;
-      calls++;
-      if (probe(pearls).unique) for (let t = 0; t < keep.length; t++) keep[t] = trial[t];
+    // 删到推不动为止 = 每题都交"同一副最小题面"，四十道只交出十三种题面。
+    // 往回随手贴几颗：贴回的是这根环自己的合法珠位，而"能推完"对加珠是单调的
+    // （原来的推法一步都没被削弱），所以照旧是证明过的题 —— 只是每道的珠子疏密不同了。
+    const core = keep.slice();
+    const gone = all.map((_, i) => i).filter((i) => !keep[i]);
+    for (const idx of rng.shuffle(gone).slice(0, rng.range(0, Math.min(3, gone.length)))) keep[idx] = true;
+    let pearls = setOf();
+    if (pearls.length < 2) return null;
+    let spec = specOf(pearls);
+    if (!logicSolve(spec)) {                 // 理论上不会发生（单调），发生就退回那道已复核过的最小题面
+      for (let t = 0; t < keep.length; t++) keep[t] = core[t];
+      pearls = setOf();
+      if (pearls.length < 2) return null;
+      spec = specOf(pearls);
     }
+    return { spec: specOf(setOf(), rng), logic: true, count: 1, capped: false };
+  }
+  for (const idx of rng.shuffle(all.map((_, i) => i))) {
+    if (calls > budget) break;
+    const trial = keep.slice();
+    trial[idx] = false;
+    const pearls = all.filter((_, t) => trial[t]);
+    if (pearls.length < 2) continue;
+    calls++;
+    if (probe(pearls).unique) for (let t = 0; t < keep.length; t++) keep[t] = trial[t];
   }
   const pearls = setOf();
   if (pearls.length < 2) return null;
   const res = probe(pearls);
   if (!res.unique) return null;
-  const lg = logicSolve(res.spec);
-  return { spec: res.spec, logic: !!lg, count: res.count, capped: res.capped };
+  return { spec: specOf(pearls, rng), logic: false, count: res.count, capped: res.capped };
 }
 
 // maxLen 之外还得压一个 minLen：随机走一步只挪 ±2 格，从小环爬不上去，
@@ -698,37 +722,51 @@ function minePearls(rng, n, m, path, budget) {
 // （中位 65 个节点就数出来了），换预算救不了 —— 与其发一道多解题，不如把盘子收小。
 const TIERS = [
   { key: 6, n: 6, m: 6, label: '6×6', tier: '入门', minLen: 12, maxLen: 20, tries: 20, budget: 90 },
-  { key: 7, n: 7, m: 7, label: '7×7', tier: '熟手', minLen: 15, maxLen: 24, tries: 20, budget: 80 },
-  { key: 8, n: 8, m: 8, label: '8×8', tier: '挑战', minLen: 18, maxLen: 26, tries: 20, budget: 70 },
+  { key: 7, n: 7, m: 7, label: '7×7', tier: '熟手', minLen: 15, maxLen: 22, tries: 20, budget: 80 },
+  { key: 8, n: 8, m: 8, label: '8×8', tier: '挑战', minLen: 18, maxLen: 26, tries: 34, budget: 70 },
 ];
 
 export const tiers = TIERS.map(({ key, label, tier }) => ({ key, label, tier }));
 export const tierOf = (sizeKey) => TIERS.find((t) => t.key === sizeKey) || TIERS[0];
 
-// 兜底：结构确定的矩形回字环 + 全部可放珠的位置。每一款都用求解器复核过才敢交出去，
-// 复核不过就换下一款（尺寸从 4×4 起才有直段可放珠）。绝不返回 null。
-function handBuilt(t) {
+// 兜底：矩形回字环 + 贪心挖珠。两条纪律：
+//   · 环长必须落在本档区间里 —— 兜底一旦跨档，"分档"就只是 TIERS 表上写着好看；
+//   · 候选按 seed 洗牌后再逐条挖珠 —— 按固定顺序交第一道，随机走失败的那几颗种子
+//     （实测 u8 有 22/40）会全撞在同一条环的同一副珠上，题面、黑珠数、起手格一起塌。
+// 挖珠顺带把同一根环裂成多道不同的题；每条都过 countSolutions 才进候选池。绝不返回 null。
+function handBuilt(t, rng) {
   const { n, m } = t;
-  const sizes = [];
-  for (const w of [Math.min(n, 6), Math.min(n, 4), Math.min(n, 5), Math.min(n, 7), n]) {
-    for (const h of [Math.min(m, 6), Math.min(m, 4), Math.min(m, 5), Math.min(m, 7), m]) sizes.push([w, h]);
-  }
-  let last = null;
-  for (const [w, h] of sizes) {
-    if (w < 4 || h < 4) continue;
-    for (const [x, y] of [[0, 0], [n - w, 0], [0, m - h], [n - w, m - h]]) {
-      if (x < 0 || y < 0 || x + w > n || y + h > m) continue;
+  const ringsIn = (band) => {
+    const out = [];
+    for (let w = 4; w <= n; w++) {
+      for (let h = 4; h <= m; h++) {
+        const perim = 2 * (w + h) - 4;
+        if (band && (perim < t.minLen || perim > t.maxLen)) continue;
+        for (let x = 0; x + w <= n; x++) for (let y = 0; y + h <= m; y++) out.push([x, y, w, h]);
+      }
+    }
+    return rng.shuffle(out);
+  };
+  // 一条环过不了"满珠唯一"只花一次 countSolutions，所以本档可以扫得宽。
+  // 两种收成分开要：纯逻辑推得完的那道直接交出去（这才配叫"挑战"），推不完的只当备胎，
+  // 整条本档都没有备胎才跨档 —— 跨档的短回字环虽然推得完，但档位表就白写了。
+  const harvest = (band, tries) => {
+    let spare = null;
+    for (const [x, y, w, h] of ringsIn(band)) {
+      if (tries-- <= 0) break;
       const path = ringPath(n, x, y, w, h);
       if (!isCycle(path, n, m)) continue;
-      const pearls = eligiblePearls(path, n, m);
-      if (pearls.length < 2) continue;
-      const spec = makeSpec(n, m, path, pearls);
-      const { count, capped } = countSolutions(spec, 2);
-      last = { spec, count, capped };
-      if (count === 1 && !capped) return spec;
+      const mined = minePearls(rng, n, m, path, t.budget);
+      if (!mined) continue;
+      if (mined.logic) return mined.spec;
+      if (!spare) spare = mined.spec;
     }
-  }
-  if (last) return last.spec;
+    return spare;
+  };
+  const inBand = harvest(true, 40);
+  if (inBand) return inBand;
+  const loose = harvest(false, 20);
+  if (loose) return loose;
   // 盘小得连 4×4 环都放不下：给一颗最小的合法题（只求交得出题，唯一性另说）
   const path = ringPath(n, 0, 0, Math.min(n, 3), Math.min(m, 3));
   const spec = makeSpec(n, m, path, eligiblePearls(path, n, m));
@@ -738,25 +776,41 @@ function handBuilt(t) {
   return spec;
 }
 
-export function generate(seed, sizeKey) {
-  const t = tierOf(sizeKey);
-  const rng = rngFrom(seed);
-  let best = null;
-  let bestScore = -1;
-  for (let attempt = 0; attempt < t.tries; attempt++) {
+// 主路的赌局：滚 rounds 轮随机环，每轮贪心挖珠，交得出题的那副按"推得完 > 环长 > 珠少"排序。
+// 单独拆出来，是为了让兜底层能接着同一串随机数再赌一轮 —— 随机走出来的鼓包环才是"人做的题"
+// 那个样子（黑珠颗数、起手格都在动），矩形回字环只是不让它交白卷的最后手段。
+// 每一轮都赌到底，赌到能推完的题面全收进篮子，最后才随种子挑一道：一发现推得完就立刻收工，
+// 等于把"二十次随机走里挑一次"压成"第一次成功的那一次"，实测题面重复率立刻翻两三倍。
+// 篮子空了才认推不完的备胎（照样过数解担保）。
+function mineLoops(rng, t, rounds) {
+  const good = [];
+  let spare = null;
+  for (let attempt = 0; attempt < rounds; attempt++) {
     const path = randomLoop(rng, t.n, t.m, t.maxLen, t.minLen);
     if (!path) continue;
     const mined = minePearls(rng, t.n, t.m, path, t.budget);
     if (!mined) continue;
-    // 能纯逻辑推完的题优先；同样推不完时挑珠少环长的（更像人做的题）
-    const score = (mined.logic ? 100 : 0) + mined.spec.par / 100 + mined.spec.pearls.length / 1000;
-    if (score > bestScore) { bestScore = score; best = mined; }
-    if (mined.logic) break;
+    if (mined.logic) { good.push(mined); continue; }
+    if (!spare) spare = mined;
   }
-  const done = best ? best.spec : handBuilt(t);
-  const chk = countSolutions(done, 2);
-  done.count = chk.count;
-  done.capped = chk.capped;
+  if (!good.length) return spare;
+  // 篮子里挑环最长的那批（同分随种子决定）：档位分的是长度，挑短的就等于把档白分了
+  // 抽签只看环最长的那一半：全挑最长等于每档只交一种环长，全随机又分不开档位
+  good.sort((a, b) => b.spec.par - a.spec.par);
+  return good[Math.min(good.length - 1, rng.int(Math.ceil(good.length / 2)))];
+}
+
+export function generate(seed, sizeKey) {
+  const t = tierOf(sizeKey);
+  const rng = rngFrom(seed);
+  const best = mineLoops(rng, t, t.tries);
+  const done = best ? best.spec : handBuilt(t, rng);
+  // 数解只补没有证明的那批：推得完的盘由那条推理链担保，靠数解过关的盘刚数过一遍
+  if (done.count !== 1 || done.capped) {
+    const chk = countSolutions(done, 2);
+    done.count = chk.count;
+    done.capped = chk.capped;
+  }
   return done;
 }
 
@@ -946,7 +1000,12 @@ export function create(spec) {
       remember();
       let ch = false;
       if (cell[c] === NO) { cell[c] = UNKNOWN; ch = true; }
-      return join(c) || attach(c) || ch;
+      if (join(c)) ch = true;
+      // 落子之后照样接线：按下与拖动必须是同一种落子语义。写成 join(c) || attach(c)
+      // 会被 join 短路，于是"点两下"永远连不上已画的邻居 —— 单测直接按 move 序列画环，
+      // 只有真点才露馅。
+      if (attach(c)) ch = true;
+      return ch;
     },
 
     move(hx, hy) {

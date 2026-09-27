@@ -651,52 +651,147 @@ export const makeSpec = (t, cells, clues) => ({
 
 const MIN_CLUES = 2;
 
-// 兜底：几条人工排好的环，线索取全部合法格。每一条都当场用 countSolutions 验一遍，
+// 环上的直段（两个拐弯之间的连续直行格），按环序给出。拿一个拐弯格当锚点，段就不会跨过头尾。
+export function straightRuns(t, cells) {
+  const kind = loopKinds(t, cells);
+  if (!kind) return null;
+  const L = kind.length;
+  let anchor = -1;
+  for (let p = 0; p < L; p++) if (kind[p] === TURN) { anchor = p; break; }
+  if (anchor < 0) return [];
+  const out = [];
+  let p = (anchor + 1) % L;
+  while (p !== anchor) {
+    if (kind[p] === TURN) { p = (p + 1) % L; continue; }
+    const seg = [];
+    while (kind[p] === STRAIGHT) { seg.push(p); p = (p + 1) % L; }
+    out.push(seg);
+  }
+  return out;
+}
+
+// 齿轮环：一条方框往两边顶"包"，把长直段切碎。为什么发题靠它而不是 randomLoop 的自由手术：
+// 线索只配落在"到前后拐弯等距"的直段中点，一条直段最多贡献一个线索。一个包会把落点的两格
+// 连同新塞进去的两格全变成拐弯，等于从长度 R 的段里吃掉两格、切成 k 与 R-2-k 两段：
+// R 是偶数时只有 k 取奇数才两段都是奇数 —— 一条本来 0 线索的段变成两条各 1 线索，净赚 2。
+// 奇数段一律不碰：切它线索数不涨（两段一奇一偶），却把环撑长、拐弯变密，
+// 实测切过奇数段的盘就推不完了 —— 白忙一场还赔掉整道选择题。
+export function gearLoop(rng, t, target, maxBumps = 12) {
+  const { n, m } = t;
+  // 框最小取到 3：2 格宽没有环，3 格宽才有"直段中点"这种落点（一条 3×3 环给出四个 1 字线索）。
+  // 下限写死成 4 的代价是 4×4 档整条齿轮只会顶出 0 线索的外框，保底直接交白卷。
+  const w = rng.range(Math.min(3, n), n);
+  const h = rng.range(Math.min(3, m), m);
+  const first = rectLoop(t, w, h, rng.int(Math.max(1, n - w + 1)), rng.int(Math.max(1, m - h + 1)));
+  if (!loopKinds(t, first)) return null;
+  let cells = first;
+  for (let b = 0; b < maxBumps; b++) {
+    const runs = straightRuns(t, cells);
+    if (!runs) return null;
+    const cuts = [];
+    for (const seg of runs) {
+      if (seg.length % 2 !== 0 || seg.length < 4) continue;      // 只切偶数段，才有净赚
+      for (let k = 1; k + 2 <= seg.length; k += 2) cuts.push([seg, k]);
+    }
+    if (!cuts.length) break;
+    rng.shuffle(cuts);
+    let moved = false;
+    // 一把顶不下去不能收工：贴盘的直段只有朝内那一侧顶得动，试错顺序碰运气就会
+    // 让整条齿轮停在方框上（实测 8×8 因此几乎全是没顶过的 24 格小框）。
+    for (const [seg, k] of cuts) {
+      const p = seg[k];
+      const d = dirBetween(t, cells[p], cells[(p + 1) % cells.length]);
+      if (d < 0) continue;
+      for (const v of rng() < 0.5 ? [d ^ 2, d ^ 3] : [d ^ 3, d ^ 2]) {
+        const next = expandAt(t, cells, new Set(cells), p, v);
+        if (next) { cells = next; moved = true; break; }
+      }
+      if (moved) break;
+    }
+    if (!moved) break;
+    if (cells.length >= target && clueListForLoop(t, cells).length >= 6) break;
+  }
+  return loopKinds(t, cells) ? cells : null;
+}
+
+// 一条环配上一副线索，两步都要当场证完才交出去：
+//   1) 全线索盘必须纯逻辑推得完 —— 推得完本身就是唯一性证明，而且一路无分支，便宜；
+//   2) 贪心删线索（同样只接受推得完的删法），最后再让 countSolutions 数一遍上保险。
+// 走不到这一步的环一律弃掉：发"数得出唯一但推不完"的盘，每删一条线索都要展开一棵
+// 回溯树，8×8 实测一道题 12 秒，手机上不可接受。
+function boardFromLoop(rng, t, cells, budget) {
+  const cands = clueListForLoop(t, cells);
+  if (cands.length < MIN_CLUES) return null;
+  const keep = cands.map(() => true);
+  const setOf = () => cands.filter((_, i) => keep[i]);
+  const full = makeSpec(t, cells, cands);
+  if (!validate(full, full.solution)) return null;                  // 题面与答案不自洽，弃
+  if (!logicSolve(full)) return null;
+  for (const idx of rng.shuffle(cands.map((_, i) => i))) {
+    if (setOf().length <= MIN_CLUES) break;
+    keep[idx] = false;
+    if (setOf().length < MIN_CLUES || !logicSolve(makeSpec(t, cells, setOf()))) keep[idx] = true;
+  }
+  // 删到推不动为止，等于每颗种子都交同一副最小题面（实测四十道只出四五种题面）。往回随手贴
+  // 几颗：贴回去的是这根环本来就合法的线索位，而"推得完"对加线索是单调的（原来的推法一步
+  // 都没被削弱），所以照旧是证明过的题 —— 只是题面的疏密终于跟着种子变了。
+  const core = keep.slice();
+  const gone = cands.map((_, i) => i).filter((i) => !keep[i]);
+  for (const idx of rng.shuffle(gone).slice(0, rng.range(0, Math.min(3, gone.length)))) keep[idx] = true;
+  let spec = makeSpec(t, cells, setOf());
+  if (!logicSolve(spec)) {                 // 理论上不会走到（单调）；真走到就退回那道复核过的最小题面
+    for (let i = 0; i < keep.length; i++) keep[i] = core[i];
+    spec = makeSpec(t, cells, setOf());
+  }
+  // 推得完的盘，数解只需一个节点：这一步是给 propagate 的正确性上保险，不是重新搜一遍
+  const proof = countSolutions(spec, 2, { budget });
+  if (proof.count !== 1 || proof.capped) return null;               // 保险丝烧了：这道不发
+  spec.count = 1;
+  spec.capped = false;
+  spec.propagates = true;
+  return spec;
+}
+
+// 兜底：一条种子驱动的齿轮环，配全部合法线索。每一条都当场验一遍，
 // 只交"被真数出来唯一"的那道；全部证不出唯一时退而交第一道自洽的（并把 count/capped
 // 如实标出来）—— 到那一步题还是那道题，只是没人替它担保唯一性。
-export function fallbackSpec(n, m = n) {
+// minPar 是本档的地板：兜底要是连环长都不挑，8×8 会交出一条 3×3 小框（par 8），
+// 玩家按"挑战"点开，收到的却是入门档都嫌短的题目。
+export function fallbackSpec(n, m = n, seed = null, minPar = 0) {
   const t = topo(n, m);
-  const cands = [];
-  for (let shrink = 0; shrink <= 2; shrink++) {
-    const w = n - shrink * 2;
-    const h = m - shrink * 2;
-    if (w >= 2 && h >= 2) cands.push(rectLoop(t, w, h, shrink, shrink));
-  }
-  if (n >= 4 && m >= 4) {
-    cands.push(rectLoop(t, n - 1, m - 1, 0, 0));
-    cands.push(rectLoop(t, n - 1, m - 1, 1, 1));
-  }
-  // "齿轮"环：方框往里顶几个小包，直段被切碎 → 线索密，唯一性最好证
-  const rng = rngFrom(`bumpy:${n}x${m}`);
-  for (let bumps = 2; bumps <= 6; bumps++) {
-    let cells = rectLoop(t, n, m, 0, 0);
-    for (let b = 0; b < bumps; b++) {
-      for (let tries = 0; tries < 40; tries++) {
-        const p = rng.int(cells.length);
-        const d = dirBetween(t, cells[p], cells[(p + 1) % cells.length]);
-        if (d < 0) continue;
-        const next = expandAt(t, cells, new Set(cells), p, rng() < 0.5 ? (d ^ 2) : (d ^ 3));
-        if (next) { cells = next; break; }
-      }
+  const rng = rngFrom(seed == null ? `fallback|${n}x${m}` : `fallback|${seed}|${n}x${m}`);
+  const target = Math.max(minPar, Math.round(t.N * 0.55));
+  // 地板要按档挑，但"没人担保唯一性"那条退路一步都不能走到：先守着本档地板找，找不到就把
+  // 地板放低一格再找 —— 交出去的题目宁可是入门档的形状，也不是一张 0 线索的空盘。
+  const sweep = (floorTry) => {
+    let loose = null;
+    const proven = [];
+    for (let b = 0; b < 24 && proven.length < 4; b++) {
+      const cells = gearLoop(rng, t, target);
+      if (!cells || cells.length < floorTry) continue;
+      const clues = clueListForLoop(t, cells);
+      if (!clues.length) continue;
+      const spec = makeSpec(t, cells, clues);
+      if (!validate(spec, spec.solution)) continue;                 // 自洽是底线
+      if (!logicSolve(spec)) continue;                              // 保底也不发推不完的盘
+      if (!loose) loose = spec;
+      const { count, capped } = countSolutions(spec, 2, { budget: 6000 });
+      // 攒四道再按种子抽签，而不是第一道过关就交：兜底也是题面多样性的一条来源，
+      // 交"第一道过关的"等于把所有掉进兜底的种子并成同一张盘。
+      if (count === 1 && !capped) proven.push(Object.assign(spec, { count: 1, capped: false, propagates: true }));
     }
-    cands.push(cells);
-  }
-  let loose = null;
-  for (const cells of cands) {
-    if (!cells || cells.length < 4) continue;
-    const clues = clueListForLoop(t, cells);
-    if (!clues.length) continue;
-    const spec = makeSpec(t, cells, clues);
-    if (!validate(spec, spec.solution)) continue;                 // 自洽是底线
-    if (!logicSolve(spec)) continue;                              // 保底也不发推不完的盘
-    if (!loose) loose = spec;
-    const { count, capped } = countSolutions(spec, 2, { budget: 6000 });
-    if (count === 1 && !capped) return Object.assign(spec, { count: 1, capped: false, propagates: true });
-  }
-  if (loose) {
+    if (proven.length) return { proven: rng.pick(proven) };
+    if (!loose) return {};
     const r = countSolutions(loose, 2, { budget: 6000 });
-    return Object.assign(loose, { count: r.count, capped: r.capped, propagates: true });
+    return { loose: Object.assign(loose, { count: r.count, capped: r.capped, propagates: true }) };
+  };
+  let gotLoose = null;
+  for (const floorTry of [minPar, Math.max(0, minPar - 6), 0]) {
+    const { proven, loose } = sweep(floorTry);
+    if (proven) return proven;
+    if (loose && !gotLoose) gotLoose = loose;
   }
+  if (gotLoose) return gotLoose;
   // 一个候选都没自洽 —— 理论上到不了这里，但交白卷就是让玩家的首页开出一张空盘。
   // 所以最后再硬拼一次整盘外框：唯一性没人担保（capped 明写），题面本身一定是道真题。
   const cells = rectLoop(t, n, m, 0, 0);
@@ -704,40 +799,39 @@ export function fallbackSpec(n, m = n) {
   return Object.assign(bare, { count: 0, capped: true });
 }
 
+// 每档的质量地板：环长与线索数。没有地板，三档会一起塌回同一种小方框 ——
+// 玩家换档等于没换题。地板值取自实测：这一族推得完的盘，par 上限就是 24-28（更大更密的
+// 齿轮盘 propagate 推不完，改走计数闸门一道要 0.8-1s，手机上不可接受），所以挑战档
+// 的地板定在 24 而不是理论上的 35，宁可如实窄一点。
+const FLOOR = {
+  6: { par: 12, clues: 3 },
+  7: { par: 18, clues: 4 },
+  8: { par: 24, clues: 4 },
+};
+
 export function generate(seed, sizeKey) {
   const n = sizeKey || 6;
   const m = n;
   const t = topo(n, m);
   const rng = rngFrom(seed);
   const target = Math.max(8, Math.round(t.N * 0.55));
-  for (let attempt = 0; attempt < 80; attempt++) {
-    const cells = randomLoop(rng, t, target);
-    if (!cells) continue;
-    const cands = clueListForLoop(t, cells);
-    if (cands.length < MIN_CLUES) continue;
-    let clues = cands.slice();
-    const full = makeSpec(t, cells, clues);
-    if (!validate(full, full.solution)) continue;                 // 题面与答案不自洽，弃
-    // 只发"纯逻辑推得完"的盘。propagate 每步只钉别无选择的边，所以推得完就等于
-    // 证明了唯一，而且一路无分支。放过这条门槛去收"数得出唯一但推不完"的盘，
-    // 代价是每删一条线索都要展开一棵回溯树 —— 8×8 实测一道题 12 秒，手机上不可接受。
-    if (!logicSolve(full)) continue;
-    for (const idx of rng.shuffle(cands.map((_, i) => i))) {
-      if (clues.length <= MIN_CLUES) break;
-      const trial = clues.filter((cl) => cl !== cands[idx]);
-      if (trial.length < MIN_CLUES) break;
-      if (logicSolve(makeSpec(t, cells, trial))) clues = trial;
-    }
-    const spec = makeSpec(t, cells, clues);
-    // 推得完的盘，数解只需一个节点：这一步是给 propagate 的正确性上保险，不是重新搜一遍
-    const proof = countSolutions(spec, 2, { budget: 6000 });
-    if (proof.count !== 1 || proof.capped) continue;              // 保险丝烧了：这道不发
-    spec.count = proof.count;
-    spec.capped = false;
-    spec.propagates = true;
-    return spec;
+  const floor = FLOOR[n] || { par: Math.round(t.N * 0.3), clues: 4 };
+  // 收满几道就够挑一道：取"第一个过关的盘"会让所有种子撞进同一个形状族，
+  // 每日挑战于是成批发出同一道题。这里攒一池合格的，再按种子自己那枚色子挑。
+  const pool = [];
+  // 前几把交给 randomLoop 的自由手术（偶尔滚出形状更好的盘），
+  // 后面一律齿轮环：实测 8×8 上手术环过不了逻辑门（0/300），齿轮才是能出题的那一族。
+  for (let attempt = 0; attempt < 64 && pool.length < 12; attempt++) {
+    const cells = attempt < 8
+      ? randomLoop(rng, t, target)
+      : gearLoop(rng, t, target + (attempt % 5) * 2, 4 + (attempt % 9) * 2);
+    if (!cells || cells.length < floor.par) continue;
+    const spec = boardFromLoop(rng, t, cells, 6000);
+    if (!spec || spec.clues.length < floor.clues) continue;
+    pool.push(spec);
   }
-  return fallbackSpec(n, m);
+  if (!pool.length) return fallbackSpec(n, m, seed, floor.par);
+  return pool[rng.int(pool.length)];
 }
 
 // ---- 引擎 -----------------------------------------------------------------------
