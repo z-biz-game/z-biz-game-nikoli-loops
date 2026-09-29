@@ -55,16 +55,71 @@ bash tools/verify.sh         # 单测 + 无头 Chrome 真指针通关，一把�
 
 ## 已验证
 
-`bash tools/verify.sh` 在本地跑通，输出即下面这些数字：
+下面这一组数字是**本轮复跑**的读数（本机 2026-09-29，`node v26.8.1`，HEAD `77f8c5e`），
+每条都点名打印它的那道命令；命令换到别的机器上重跑，条数会变，而下面这些是这一次的账：
 
-- **106 项引擎单测**（`node --test test/`）。四款各自 26–34 项，最重的一条是每档
-  fuzz 40 颗种子：逐道断言 `validate` 自洽、`countSolutions` 数到 2 早停仍得 `count = 1`
-  且 `capped = false`、`par` 等于唯一解的量、笔画序列真能一笔画完。保底题面
-  （`rescue()` / `fallbackSpec()`）不靠"应该不会走到"——在 4..10 每一档上逐项验死。
+```bash
+npm run check          # → OK（对 git ls-files 里每个 .js/.mjs 做 node --check）
+npm test               # → tests 132 / pass 130 / fail 0 / todo 2 / duration_ms 6930
+bash tools/verify.sh   # → rows: 55  fail: []  errors: []，末尾 === ALL GREEN ===，rc=0
+```
+
+- **132 项引擎单测**（`node --test test/`，其中 2 项是故意标出来的 `todo`，见下面「已知边界」）。
+  本轮逐文件计数：arukone 34 / hashi 34 / masyu 32 / slitherlink 32，两盏 todo 一盏在 arukone、
+  一盏在 masyu。最重的一条是每档 fuzz 40 颗种子：逐道断言 `validate` 自洽、
+  `countSolutions` 数到 2 早停仍得 `count = 1` 且 `capped = false`、`par` 等于唯一解的量、
+  笔画序列真能一笔画完。保底题面（`rescue()` / `fallbackSpec()`）不靠"应该不会走到"——
+  在 4..10 每一档上逐项验死。
 - **55 项无头复验**（`tools/playtest.mjs`，CDP `Input` 域）。真 `mousePressed/Moved/Released`
   打到画布上，四款各从最贵一档一路画到结算屏：判胜、星级、存档、HUD 全走 live 路径；
   两款坐标族各自验键盘光标（`step` 1 与 2 的夹取上界不同）、副笔不计步、撤销不退款；
   390×720 手机视口下圈环 / 珍珠 / 数桥各自重画一遍到底；全程零控制台错误。
+  截图与 `result.json` 落在 `.playtest/`（已 gitignore，是复验产物不是源码）。
+- **远端那一跑**（不是本机跑的，别把两者混成一件事）：`77f8c5e` 上 CI run
+  `36421441160` 与 Pages run `36421441126` 都是 `completed/success`，CI 里跑的就是
+  `bash tools/verify.sh`（`.github/workflows/ci.yml` 那一步叫「引擎单测 + 无头真指针通关」，
+  看门狗 `WD_TIMEOUT=900`）；
+  线上页 <https://z-biz-game.github.io/z-biz-game-nikoli-loops/> 回 200。
+
+## 已知边界（两处红着的诚实，不是待办清单）
+
+`npm test` 里那 **2 项 `todo`** 是这个仓故意亮着的两盏红灯：它们各自断言一件引擎现在
+做不到的事，标成 `todo` 是为了"看得见、但不拦上线"——**不许**为了让读数好看把它们改成
+`skip` 或删掉，也不许把期望值改成引擎当前给得出的那个（那等于把天花板写进断言）：
+
+- **箭头 Arukone**（`test/arukone.test.mjs` 那条「不同种子的题面各不相同：线索、环长、环都得
+  动起来（6×6 八颗种子）」）：`propagate` 只推得完"四线索方框族"，
+  所以不同种子的题面在环长与环的形状上动的幅度有限（题面多样性天花板十几张）。本轮这一盏灯
+  报出来的原话是「8 颗种子只出 **7** 张不同题面，其中 **1** 次落到兜底 `fallbackSpec(6,6)`」——
+  `todo` 项的断言消息会照样打印，不静默。
+  唯一解与可推完这两条仍然逐颗种子成立 —— 这条 todo 说的是**多样性**，不是正确性。
+- **珍珠 Masyu**（`test/masyu.test.mjs` 那条「黑珠颗数也该跟着种子动」）：能纯逻辑推完的环≈矩形回字环，
+  四角就是黑珠，于是 7×7 的黑珠颗数只有 4/3 这几种 —— 黑珠颗数是**固有常数**，不随种子动。
+  这条要等 wiggle 环能出题才该转绿。
+
+另外三件任何闸都没说它能做到的事，按实写在这里：
+
+- **不承诺大盘面**。四款的档位就停在表里那三档（最贵 8×8 / 11×11 数桥）；比菜单更大的尺寸
+  没有闸守住"人能点得中"——半格坐标的命中框只有半个格，无头复验只在 390×720 视口验过那三款。
+- **不承诺"数得出"等于"推得完"**。唯一性由 `propagate` 推到不动点**证明**，
+  `countSolutions` 只当保险丝；数不完就如实标 `capped`，绝不说"唯一"。珍珠那一档写的是
+  "能纯逻辑推完的盘优先发"，不是"只发纯逻辑盘"——这一字之差正是上面那条 Masyu todo 的位置。
+- **不承诺 `file://` 能打开**。裸 ES Module 在 `file://` 下被 CORS 挡掉，必须有 `http://`。
+
+## 端口
+
+`tools/serve.mjs` 默认 **5189**，无头复验的 CDP 口默认 **9336**（两者都可以用 `SPORT` /
+`CDP_PORT` 覆盖）。这两个数是刻意与姊妹辑 `z-biz-game-nikoli-cos` 的 5188 / 9335 错开的：
+两个仓常常同时复验，撞了端口会**静默连到对面的页面**上去——那边全绿、这边一无所有。
+
+光错开端口只是愿望，所以 `tools/verify.sh` 的预检**按字节比对**：起服后先取 `/` 的响应体，
+与磁盘上的 `index.html` 逐字比，再取 `js/main.js` 同样逐字比；任一处不一致就
+`预检失败：:5189 回的字节不是本仓的 index.html` 并 `exit 3`。这一条是这一轮补的——
+补之前它只问"有没有 200"，而 5189 若被别的项目占着，本仓的 serve 会因 EADDRINUSE 死掉、
+对面那个服务照样回 200，于是整趟复验打在别人的页面上还能全绿。
+补完当场做过自证：在 5189 上摆一个只回 `<html><body>not the loops game</body></html>` 的
+假服务再跑，预检报出上面那一句、`rc=3`；撤掉假服务后同一脚本 `rows: 55 fail: [] errors: []`
+且 `=== ALL GREEN ===`、`rc=0`。
 
 ## 存档
 
