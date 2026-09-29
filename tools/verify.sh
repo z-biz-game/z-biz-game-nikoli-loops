@@ -54,6 +54,21 @@ for i in $(seq 1 40); do
   sleep 0.25
 done
 curl -fsS -m 2 "$BASE" >/dev/null 2>&1 || { echo "静态服没起来：$(cat /tmp/nikoli-loops-serve.log)" >&2; exit 3; }
+# 预检必须**按字节**比对，只问"有没有 200"不算预检：$SPORT 若被别的项目已经绑上，
+# 本仓的 serve 会因 EADDRINUSE 死掉，而对面那个服务照样回 200 —— 于是"静态服起来了"
+# 这一关过了，整趟复验却打在另一个应用的页面上（那边全绿、这边一无所有）。
+SERVED=$(curl -fsS -m 5 "$BASE" 2>/dev/null || true)
+if [ "$SERVED" != "$(cat "$HERE/index.html")" ]; then
+  echo "预检失败：:$SPORT 回的字节不是本仓的 index.html —— 端口被别的服务占了？（serve 日志：$(cat /tmp/nikoli-loops-serve.log)）" >&2
+  exit 3
+fi
+# 页面加载靠的是 ES Module 图：index.html 在、js/ 全 404 会表现成一张白盘，
+# 所以入口模块也必须是这条服真的吐出来的。
+MODULE=$(curl -fsS -m 5 "${BASE}js/main.js" 2>/dev/null || true)
+if [ "$MODULE" != "$(cat "$HERE/js/main.js")" ]; then
+  echo "预检失败：$BASE/js/main.js 回的字节与磁盘上的不一致（这条服不是本仓的文档根？）" >&2
+  exit 3
+fi
 # 全新 --user-data-dir 绑定 DevTools 比热档慢，等端点而不是猜 sleep。
 for i in $(seq 1 60); do
   curl -fsS -m 1 "http://127.0.0.1:$CDP/json/version" >/dev/null 2>&1 && break
