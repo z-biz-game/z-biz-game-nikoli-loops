@@ -9,7 +9,11 @@
 #
 #   ./tools/verify.sh                    # 全跑
 #   KINDS=slitherlink ./tools/verify.sh # 只复验一种玩法（跳过单测用 SKIP_UNIT=1）
-set -u
+set -u -o pipefail
+# pipefail 不是风格问题，是单测那一步的命：`node --test test/ | tail -14 || FAILED=1` 里
+# `||` 拿到的是 tail 的退出码，而 tail 读到 EOF 就退 0 —— 套件红透也照样 FAILED=0。
+# 本仓的 CI 只有 `bash tools/verify.sh` 这一步跑引擎单测，所以没这条 flag 时，
+# "引擎单测过了"这句在 CI 里结构上不可能变红。
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 CDP=${CDP_PORT:-9336}
 # 5173 在本机常被别的项目的 dev server 占着，绑失败会静默对旧端口做测试，所以默认另起。
@@ -30,8 +34,15 @@ cd "$HERE"
 FAILED=0
 
 if [ -z "${SKIP_UNIT:-}" ]; then
+  mkdir -p "$SHOTS"
   echo "=== 单测（引擎纯逻辑，无浏览器）==="
-  node --test test/ | tail -14 || FAILED=1
+  npm test --silent > "$SHOTS/unit.log" 2>&1
+  URC=$?
+  # 打印计数行而不是尾 14 行：全绿时输出末尾是两盏 todo 的断言栈，`tail -14` 于是
+  # 在 CI 里贴出一段像崩了的栈，而真正该被读回的 tests/pass/fail/todo 一行都看不见。
+  # spec 与 tap 两种 reporter 都要认（CI 不是 TTY，走 tap 的 `# tests N`）。
+  grep -E '^(ℹ|#) (tests|pass|fail|todo) ' "$SHOTS/unit.log" || tail -14 "$SHOTS/unit.log"
+  [ $URC -eq 0 ] || { echo "  RED 单测 rc=$URC（全文见 $SHOTS/unit.log）"; FAILED=1; }
 fi
 
 echo "=== 静态服 :$SPORT ==="

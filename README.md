@@ -12,7 +12,7 @@
 
 ```bash
 node tools/serve.mjs         # → http://127.0.0.1:5189/，然后点开任一档位
-node --test test/            # 引擎单测（不开浏览器）
+npm test                   # 引擎单测（不开浏览器）= `node --test test/`
 bash tools/verify.sh         # 单测 + 无头 Chrome 真指针通关，一把梭
 ```
 
@@ -55,21 +55,33 @@ bash tools/verify.sh         # 单测 + 无头 Chrome 真指针通关，一把�
 
 ## 已验证
 
-下面这一组数字是**本轮复跑**的读数（本机 2026-09-29，`node v26.8.1`，HEAD `77f8c5e`），
+下面这一组数字是**本轮复跑**的读数（本机 2026-10-06，`node v26.8.1`，跑在本次改动后的树上），
 每条都点名打印它的那道命令；命令换到别的机器上重跑，条数会变，而下面这些是这一次的账：
 
 ```bash
-npm run check          # → OK（对 git ls-files 里每个 .js/.mjs 做 node --check）
-npm test               # → tests 132 / pass 130 / fail 0 / todo 2 / duration_ms 6930
+npm run check          # → OK（对 git ls-files 里每个 .js/.mjs 做 node --check，本轮 23 个文件）
+npm test               # → tests 135 / pass 133 / fail 0 / todo 2 / duration_ms 7700
 bash tools/verify.sh   # → rows: 55  fail: []  errors: []，末尾 === ALL GREEN ===，rc=0
 ```
 
-- **132 项引擎单测**（`node --test test/`，其中 2 项是故意标出来的 `todo`，见下面「已知边界」）。
-  本轮逐文件计数：arukone 34 / hashi 34 / masyu 32 / slitherlink 32，两盏 todo 一盏在 arukone、
+- **135 项引擎单测**（`node --test test/`，其中 2 项是故意标出来的 `todo`，见下面「已知边界」）。
+  本轮逐文件计数：arukone 34 / hashi 34 / masyu 32 / slitherlink 32 / precache 3，两盏 todo 一盏在 arukone、
   一盏在 masyu。最重的一条是每档 fuzz 40 颗种子：逐道断言 `validate` 自洽、
   `countSolutions` 数到 2 早停仍得 `count = 1` 且 `capped = false`、`par` 等于唯一解的量、
   笔画序列真能一笔画完。保底题面（`rescue()` / `fallbackSpec()`）不靠"应该不会走到"——
   在 4..10 每一档上逐项验死。
+- **闸的接线**（本轮改的就是这个）：CI 的「语法自检」原先把 `package.json` 的 `check` leg 逐字
+  抄在 workflow 里（同一条 `git ls-files '*.js' '*.mjs'`，两边都是 23 个文件，所以对账无损），
+  现在那一步是 `run: npm run check`；`tools/verify.sh` 的单测那一步同理从抄本改成调
+  `npm test --silent`，输出落盘后再打印 `tests / pass / fail / todo` 四行计数。抄本的坏处不是
+  啰嗦，是 leg 改了名单 CI 不会跟着红。
+  更要紧的一处：这个脚本原先只有 `set -u`、没有 `pipefail`，而 `… | tail -14 || FAILED=1` 里
+  `||` 判的是 `tail` 的退出码（tail 读到 EOF 就退 0）。CI 只有 `bash tools/verify.sh` 这一步会跑
+  引擎单测，所以补 flag 之前，「引擎单测过了」这句话在 CI 里结构上不可能变红。
+  本机两个方向的对照（同一份块文本，从定稿的 `verify.sh` 里原样摘出来跑）：干净树
+  → `ℹ tests 135 / pass 133 / fail 0 / todo 2`、`FAILED=0`；一份带 planted 失败条目的副本
+  （`_scratch/nl-red/`，132+1 条）→ `fail 1` 外加 `RED 单测 rc=1`、`FAILED=1`。
+  计数行两种 reporter 都认（本机 spec 的 `ℹ tests N`、CI 非 TTY 走 tap 的 `# tests N`）。
 - **55 项无头复验**（`tools/playtest.mjs`，CDP `Input` 域）。真 `mousePressed/Moved/Released`
   打到画布上，四款各从最贵一档一路画到结算屏：判胜、星级、存档、HUD 全走 live 路径；
   两款坐标族各自验键盘光标（`step` 1 与 2 的夹取上界不同）、副笔不计步、撤销不退款；
