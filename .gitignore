@@ -26,3 +26,4 @@ AuthKey_*.p8
 node_modules/
 npm-debug.log*
 yarn-error.log*
+_scratch/
