@@ -42,7 +42,22 @@ if [ -z "${SKIP_UNIT:-}" ]; then
   # 在 CI 里贴出一段像崩了的栈，而真正该被读回的 tests/pass/fail/todo 一行都看不见。
   # spec 与 tap 两种 reporter 都要认（CI 不是 TTY，走 tap 的 `# tests N`）。
   grep -E '^(ℹ|#) (tests|pass|fail|todo) ' "$SHOTS/unit.log" || tail -14 "$SHOTS/unit.log"
-  [ $URC -eq 0 ] || { echo "  RED 单测 rc=$URC（全文见 $SHOTS/unit.log）"; FAILED=1; }
+  # 光把 rc 接回来还不够：CI 的 runner 连着四次报 `# tests 1 / # fail 1`（40ms，`test/`
+  # 那五个套件一个都没进来），而 `1` 这一项本身退 1 —— 有 rc 也得有人判断"什么都没发现"
+  # 是一种红。下限用这条腿自己的输入集数出来（同一个 glob），不抄一个写死的数字。
+  FILES=0
+  for f in test/*.test.mjs; do [ -e "$f" ] || continue; FILES=$((FILES+1)); done
+  T=$(grep -oE '^(ℹ|#) tests [0-9]+' "$SHOTS/unit.log" | head -1 | grep -oE '[0-9]+$')
+  if [ -z "$T" ]; then
+    echo "  RED 单测没打印出 tests 计数行：reporter 换了形状，这道计数闸自己空了（全文见 $SHOTS/unit.log）"
+    FAILED=1
+  elif [ "$T" -lt "$FILES" ]; then
+    echo "  RED 单测只报了 $T 项，比 test/*.test.mjs 的 $FILES 个套件还少 —— 这一跑基本什么都没发现"
+    FAILED=1
+  fi
+  [ $URC -eq 0 ] || { echo "  RED 单测 rc=$URC（全文见 $SHOTS/unit.log）"
+    grep -E '^not ok' "$SHOTS/unit.log" | head -20
+    FAILED=1; }
 fi
 
 echo "=== 静态服 :$SPORT ==="

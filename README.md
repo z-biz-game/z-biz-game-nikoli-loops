@@ -12,7 +12,7 @@
 
 ```bash
 node tools/serve.mjs         # → http://127.0.0.1:5189/，然后点开任一档位
-npm test                   # 引擎单测（不开浏览器）= `node --test test/`
+npm test                   # 引擎单测（不开浏览器）= `node --test test/*.test.mjs`
 bash tools/verify.sh         # 单测 + 无头 Chrome 真指针通关，一把梭
 ```
 
@@ -55,16 +55,16 @@ bash tools/verify.sh         # 单测 + 无头 Chrome 真指针通关，一把�
 
 ## 已验证
 
-下面这一组数字是**本轮复跑**的读数（本机 2026-10-06，`node v26.8.1`，跑在本次改动后的树上），
+下面这一组数字是**本轮复跑**的读数（本机 2026-10-07，`node v26.8.1`，跑在本次改动后的树上），
 每条都点名打印它的那道命令；命令换到别的机器上重跑，条数会变，而下面这些是这一次的账：
 
 ```bash
 npm run check          # → OK（对 git ls-files 里每个 .js/.mjs 做 node --check，本轮 23 个文件）
-npm test               # → tests 135 / pass 133 / fail 0 / todo 2 / duration_ms 7700
+npm test               # → tests 135 / pass 133 / fail 0 / todo 2 / duration_ms 8690
 bash tools/verify.sh   # → rows: 55  fail: []  errors: []，末尾 === ALL GREEN ===，rc=0
 ```
 
-- **135 项引擎单测**（`node --test test/`，其中 2 项是故意标出来的 `todo`，见下面「已知边界」）。
+- **135 项引擎单测**（`node --test test/*.test.mjs`，其中 2 项是故意标出来的 `todo`，见下面「已知边界」）。
   本轮逐文件计数：arukone 34 / hashi 34 / masyu 32 / slitherlink 32 / precache 3，两盏 todo 一盏在 arukone、
   一盏在 masyu。最重的一条是每档 fuzz 40 颗种子：逐道断言 `validate` 自洽、
   `countSolutions` 数到 2 早停仍得 `count = 1` 且 `capped = false`、`par` 等于唯一解的量、
@@ -82,6 +82,23 @@ bash tools/verify.sh   # → rows: 55  fail: []  errors: []，末尾 === ALL GRE
   → `ℹ tests 135 / pass 133 / fail 0 / todo 2`、`FAILED=0`；一份带 planted 失败条目的副本
   （`_scratch/nl-red/`，132+1 条）→ `fail 1` 外加 `RED 单测 rc=1`、`FAILED=1`。
   计数行两种 reporter 都认（本机 spec 的 `ℹ tests N`、CI 非 TTY 走 tap 的 `# tests N`）。
+- **接上退出码之后，这一步立刻红了一次**（`79b5fe6` 的 CI run `37529949939`）：
+  `# tests 1 / pass 0 / fail 1 / duration_ms 39.7`，然后才是新加的 `RED 单测 rc=1`。
+  把这仓的 CI 历史倒回去读，同一个形状出现在 `36421441160`、`37120631557`、`37342081161`、
+  `37446970607` —— 四个不同的 commit、40 毫秒、`1..1`，所以它不是某条断言红了，而是
+  **这条腿在 runner 上一个套件都没跑**：`npm test` 当时写的是目录写法 `node --test test/`。
+  本机（`node v26.8.1`）同一条目录写法跑得出 135 项，姊妹仓 `z-biz-game-nikoli-cos` 在同一批
+  runner 上用 `node --test test/*.test.mjs` 跑出 269 项，所以改成了显式 glob —— 五个文件由 shell
+  展开，新增套件不用改这里，展开不到文件时会当场红而不是静默少跑。
+  再加一道下限：计数行里的 `tests` 必须 ≥ 同一条 glob 数出来的套件文件数，且计数行必须存在。
+  只看 rc 不够——CI 那一次报的 `1` 项本身就是红的，rc 已经接上了；但"什么都没发现 yet 退 0"
+  这种跑法照样要红。三个方向的对照（块文本从定稿的 `verify.sh` 原样摘出来跑）：
+  干净树 → `ℹ tests 135`、`FILES=5`、`FAILED=0`；把 runner 那次 `# tests 1 / fail 1` 的形状
+  原样喂进去 → 两行红（`只报了 1 项，比 … 的 5 个套件还少` 与 `RED 单测 rc=1`）并打出
+  `not ok` 那一行；rc=0 但不打印计数行 → `RED 单测没打印出 tests 计数行`、`FAILED=1`。
+  本机没有 node 22（这个网络到不了 nodejs.org 与 docker hub），所以"目录写法在 runner 上具体
+  怎么被发现"没有本地复现，只有上面那四次同形状的 CI 读数；换写法之后 CI 到底跑了几项，
+  以推上去那一跑的 runner 日志为准，不预判。
 - **55 项无头复验**（`tools/playtest.mjs`，CDP `Input` 域）。真 `mousePressed/Moved/Released`
   打到画布上，四款各从最贵一档一路画到结算屏：判胜、星级、存档、HUD 全走 live 路径；
   两款坐标族各自验键盘光标（`step` 1 与 2 的夹取上界不同）、副笔不计步、撤销不退款；
@@ -90,8 +107,9 @@ bash tools/verify.sh   # → rows: 55  fail: []  errors: []，末尾 === ALL GRE
 - **远端那一跑**（不是本机跑的，别把两者混成一件事）：`77f8c5e` 上 CI run
   `36421441160` 与 Pages run `36421441126` 都是 `completed/success`，CI 里跑的就是
   `bash tools/verify.sh`（`.github/workflows/ci.yml` 那一步叫「引擎单测 + 无头真指针通关」，
-  看门狗 `WD_TIMEOUT=900`）；
-  线上页 <https://z-biz-game.github.io/z-biz-game-nikoli-loops/> 回 200。
+  看门狗 `WD_TIMEOUT=900`）。这一句先前写得太整：那次 run 的 success 里，**浏览器那 55 行是真跑了**
+  （日志里逐条 `ok` 数得出来），而它名字里的"引擎单测"那一步当时打的是 `# tests 1 / # fail 1`，
+  被 `tail` 的退出码吞成一个绿——见上面两条。线上页 <https://z-biz-game.github.io/z-biz-game-nikoli-loops/> 回 200。
 
 ## 已知边界（两处红着的诚实，不是待办清单）
 
