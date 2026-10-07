@@ -97,8 +97,13 @@ bash tools/verify.sh   # → rows: 55  fail: []  errors: []，末尾 === ALL GRE
   原样喂进去 → 两行红（`只报了 1 项，比 … 的 5 个套件还少` 与 `RED 单测 rc=1`）并打出
   `not ok` 那一行；rc=0 但不打印计数行 → `RED 单测没打印出 tests 计数行`、`FAILED=1`。
   本机没有 node 22（这个网络到不了 nodejs.org 与 docker hub），所以"目录写法在 runner 上具体
-  怎么被发现"没有本地复现，只有上面那四次同形状的 CI 读数；换写法之后 CI 到底跑了几项，
-  以推上去那一跑的 runner 日志为准，不预判。
+  怎么被发现"没有本地复现，只有上面那四次同形状的 CI 读数。换写法之后那一跑已经读回来了：
+  `b2624d4` 的 CI run `37558874356` = `completed/success`，第 5 步打的是
+  `# tests 135 / pass 133 / fail 0 / todo 2` 加 `rows: 55 fail: []`，与本机的 spec 读数同一组数
+  ——这一步在本仓 CI 里第一次真的把 135 项跑了。下限为什么取"≥ 套件文件数"而不是"= 135"：
+  同组织另两仓的 tap 顶格形状不一样（`z-biz-game-hitori-cos` 的 runner 日志里顶格 6 项是
+  **六个文件**、`z-biz-game-zebra-cos` 的 29 项是 29 条用例名），所以条数会被 reporter 形状带着走，
+  而"至少每个套件都得进来一次"这一步两边都判得准。
 - **55 项无头复验**（`tools/playtest.mjs`，CDP `Input` 域）。真 `mousePressed/Moved/Released`
   打到画布上，四款各从最贵一档一路画到结算屏：判胜、星级、存档、HUD 全走 live 路径；
   两款坐标族各自验键盘光标（`step` 1 与 2 的夹取上界不同）、副笔不计步、撤销不退款；
