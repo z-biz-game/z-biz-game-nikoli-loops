@@ -1,0 +1,29 @@
+# 这是个零构建、零依赖的裸 ES Module 项目：没有 dist/、没有 node_modules 也该能跑。
+# 这里只挡本机噪音和复验产物。
+
+# macOS
+.DS_Store
+._*
+
+# 无头复验产物（tools/verify.sh 写的截图与 result.json）
+.playtest/
+
+# 编辑器/工具本机状态
+*.local
+.vscode/
+.idea/
+
+# 密钥绝不入库（本项目不该有，但挡一道）
+.env
+.env.*
+secrets/
+*.p12
+*.p8
+*.mobileprovision
+AuthKey_*.p8
+
+# 万一有人拿 npm 装了东西跑基准测试
+node_modules/
+npm-debug.log*
+yarn-error.log*
+_scratch/

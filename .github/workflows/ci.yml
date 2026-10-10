@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 零构建项目也要过语法关：一个语法错的引擎文件在浏览器里只会表现为"点了没反应"。
+      # 这一步原先手抄了 package.json 的 check leg（同一句 git ls-files '*.js' '*.mjs'）：
+      # 抄本的问题不是啰嗦，是两份真相 —— leg 改了名单，这一步不会跟着红，
+      # 它漏掉某个目录也没人查。正本跑起来打印 `OK`、覆盖同样 23 个文件。
+      - name: 语法自检
+        run: npm run check
+
+      # 四款 × 最贵一档，外加两款坐标族的键盘与手机视口：比姊妹辑多一倍落子点，
+      # 看门狗给到 900 秒，别让 CI 比本机先放弃。
+      - name: 引擎单测 + 无头真指针通关
+        run: bash tools/verify.sh
+        env:
+          WD_TIMEOUT: 900
+
+      # 复验截图是这仓库的"我看过了"证据，失败时也要留下。
+      - name: 上传复验截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playtest
+          path: .playtest/
+          if-no-files-found: ignore

@@ -1,0 +1,16 @@
+{
+  "name": "nikoli-loops",
+  "version": "1.0.0",
+  "description": "纸上逻辑 Nikoli · 环线 —— 浏览器原生点阵谜题：圈环 / 珍珠 / 箭头 / 数桥。玩家画的是边不是格，四款玩法各带唯一解生成器与真求解器（提示即推理）。零构建、零运行时依赖、无美术与音频文件。",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "for f in $(git ls-files '*.js' '*.mjs'); do node --check \"$f\" || exit 1; done && echo OK",
+    "verify": "bash tools/verify.sh"
+  },
+  "keywords": ["game", "puzzle", "slitherlink", "masyu", "yajilin", "hashi", "loop", "logic", "canvas", "web"],
+  "author": "z-biz-game",
+  "license": "MIT"
+}

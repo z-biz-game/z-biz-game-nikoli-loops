@@ -1,0 +1,54 @@
+// Deterministic RNG. Every puzzle in this game is a pure function of a seed, so a
+// level is reproducible across devices — that is what makes the daily challenge and
+// the solver tests mean the same thing on both sides.
+
+export function hashSeed(str) {
+  // FNV-1a over the UTF-8 bytes; string seeds are the on-the-wire form (daily key,
+  // URL ?seed=, localStorage record id).
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i) & 0xff;
+    h = Math.imul(h, 0x01000193);
+    h ^= (str.charCodeAt(i) >> 8) & 0xff;
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+export function mulberry32(a) {
+  let s = a >>> 0;
+  const rng = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  rng.int = (n) => Math.floor(rng() * n);
+  rng.range = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+  rng.pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  rng.shuffle = (arr) => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+  rng.fork = (tag) => mulberry32(hashSeed(tag + ':' + rng().toFixed(12)));
+  return rng;
+}
+
+export function rngFrom(seed) {
+  if (typeof seed === 'function' && seed.int) return seed;
+  if (typeof seed === 'number') return mulberry32(seed >>> 0);
+  return mulberry32(hashSeed(String(seed)));
+}
+
+// Local calendar day — the daily puzzle rolls at midnight where the player is, which
+// is how every other daily-puzzle game behaves.
+export function todayKey(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
