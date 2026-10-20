@@ -1,7 +1,7 @@
 // 应用外壳：路由、计时、记分、输入设备无关性都在这里。棋盘内部的一切属于引擎。
 
-import { store } from '../core/storage.js';
-import { sfx, haptic } from '../core/audio.js';
+import { store, prefersReducedMotion, onReducedMotionChange } from '../core/storage.js';
+import { sfx, haptic, applySound, soundState, toggleMuted } from '../core/audio.js';
 import { todayKey } from '../core/rng.js';
 import { KINDS, byId, dailySpec, dailySeed } from '../puzzles/registry.js';
 import { LatticeView } from './lattice_view.js';
@@ -31,6 +31,7 @@ const S = {
   startedAt: 0,
   elapsed: 0,
   paused: false,
+  pausedByBlur: false,
   tool: 0,
   lastSecond: -1,
 };
@@ -66,6 +67,61 @@ const route = () => {
 
 function show(name) {
   for (const s of $$('.screen')) s.hidden = s.id !== name;
+}
+
+// ---- 暂停 / 全屏 --------------------------------------------------------------
+
+// 暂停要做三件事：计时停、rAF 停（一帧都不推，仿真自然不推进）、输入拒收。
+// 只把界面盖住而让回路继续跑的"暂停"是假的：计时会继续涨，笔迹还会落进棋盘。
+function setPaused(on) {
+  if (!S.kind) return;
+  const want = !!on;
+  if (S.paused === want && !want) return;
+  if (want) {
+    S.elapsed = elapsedMs();
+    S.paused = true;
+    view && view.setPaused(true);
+  } else {
+    S.startedAt = performance.now();
+    S.paused = false;
+    view && view.setPaused(false);
+  }
+  const veil = $('#paused-veil');
+  if (veil) veil.hidden = !S.paused;
+  const btn = $('#pause-btn');
+  if (btn) {
+    btn.textContent = S.paused ? '继续' : '暂停';
+    btn.setAttribute('aria-pressed', S.paused ? 'true' : 'false');
+  }
+  updateHud();
+}
+
+function isFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+// 全屏按钮绑在 index.html 里真实存在的 #fs-btn 上；iOS Safari 没有
+// requestFullscreen（只有 video 元素能全屏），所以这条路要给出声的降级而不是静默失败。
+function toggleFullscreen() {
+  const el = document.documentElement;
+  const go = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (isFullscreen()) {
+    const out = document.exitFullscreen || document.webkitExitFullscreen;
+    if (out) Promise.resolve(out.call(document)).catch(() => toast('系统不让退出全屏'));
+  } else if (go) {
+    Promise.resolve(go.call(el)).catch(() => toast('这个浏览器不给全屏（iOS Safari 只能靠系统手势）'));
+  } else {
+    toast('这个浏览器不给全屏（iOS Safari 只能靠系统手势）');
+  }
+}
+
+function syncFullscreenBtn() {
+  const b = $('#fs-btn');
+  if (!b) return;
+  const on = isFullscreen();
+  b.textContent = on ? '⛶' : '⤢';
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  b.title = on ? '退出全屏 (F)' : '全屏 (F)';
 }
 
 // ---- 首页 -----------------------------------------------------------------------
@@ -176,7 +232,11 @@ function start(kind, sizeKey, index, daily) {
 
   view.attach(S.engine);
   view.tool = 0;
+  view.setPaused(false);
   view.layout();
+  S.paused = false;
+  { const veil = $('#paused-veil'); if (veil) veil.hidden = true; }
+  { const pb = $('#pause-btn'); if (pb) { pb.textContent = '暂停'; pb.setAttribute('aria-pressed', 'false'); } }
   $('#play-title').textContent = kind.title;
   $('#play-size').textContent = sizeLabel(kind, sizeKey) + (daily ? ' · 今日' : '');
   $('#hint-note').textContent = kind.shell.tip;
@@ -293,8 +353,16 @@ function openHowto(kind) {
 }
 
 function syncSettings() {
-  $$('#settings input[data-setting]').forEach((i) => { i.checked = !!store.settings[i.dataset.setting]; });
-  $('#sound-btn').classList.toggle('off', !store.settings.sound);
+  $$('#settings input[data-setting]').forEach((i) => {
+    const v = store.settings[i.dataset.setting];
+    i.checked = i.dataset.setting === 'reduceMotion' ? prefersReducedMotion() : !!v;
+  });
+  const btn = $('#sound-btn');
+  const on = !!store.settings.sound;
+  btn.classList.toggle('off', !on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  // 真静音：把已经活着的 AudioContext 挂起（静音态不再新建振荡器节点）
+  applySound(on);
 }
 
 // ---- 装配 -----------------------------------------------------------------------
@@ -320,10 +388,12 @@ export function boot() {
     else if (a === 'settings') { syncSettings(); $('#settings').showModal(); }
     else if (a === 'howto-global') openHowto(KINDS[0]);
     else if (a === 'toggle-sound') {
-      store.set('sound', !store.settings.sound);
+      toggleMuted();
       syncSettings();
       sfx.click();
-    } else if (a === 'undo' && doUndo()) { /* played sound */ }
+    } else if (a === 'pause') setPaused(!S.paused);
+    else if (a === 'fullscreen') toggleFullscreen();
+    else if (a === 'undo' && doUndo()) { /* played sound */ }
     else if (a === 'redo' && doRedo()) { /* ditto */ }
     else if (a === 'hint') doHint();
     else if (a === 'restart') doRestart();
@@ -356,15 +426,22 @@ export function boot() {
     };
   });
 
+  const veil = $('#paused-veil');
+  if (veil) veil.addEventListener('click', () => setPaused(false));
+  document.addEventListener('fullscreenchange', syncFullscreenBtn);
+  document.addEventListener('webkitfullscreenchange', syncFullscreenBtn);
+  onReducedMotionChange(() => { if (view) view.layout(); });
+
   window.addEventListener('hashchange', route);
+  // 切后台 = 自动暂停（走同一个 setPaused，计时/回路/输入三件事一起停），
+  // 回到前台只在"因为后台而暂停"时自动续上 —— 玩家自己按的暂停不许被切后台抹掉。
   document.addEventListener('visibilitychange', () => {
     if (!S.kind || $('#play').hidden) return;
     if (document.hidden) {
-      S.elapsed = elapsedMs();
-      S.paused = true;
-    } else {
-      S.startedAt = performance.now();
-      S.paused = false;
+      if (!S.paused) { setPaused(true); S.pausedByBlur = true; }
+    } else if (S.pausedByBlur) {
+      S.pausedByBlur = false;
+      setPaused(false);
     }
   });
 
@@ -372,8 +449,12 @@ export function boot() {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     if ($('#settings').open || $('#howto').open) return;
     const k = ev.key;
-    if (k === 'Escape') { location.hash = '#/'; return; }
+    if (k === 'Escape') { if (S.paused) { setPaused(false); return; } location.hash = '#/'; return; }
     if ($('#play').hidden) return;
+    if (k === 'p' || k === 'P') { setPaused(!S.paused); return; }
+    if (k === 'm' || k === 'M') { toggleMuted(); syncSettings(); return; }
+    if (k === 'f' || k === 'F') { toggleFullscreen(); return; }
+    if (k === '?') { openHowto(S.kind); return; }
     const nav = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
     if (nav) { view.nudge(...nav); ev.preventDefault(); return; }
     if (k === ' ' || k === 'Enter') { view.press(true); ev.preventDefault(); return; }
@@ -387,6 +468,7 @@ export function boot() {
   });
 
   syncSettings();
+  syncFullscreenBtn();
   renderHome();
   route();
 }
@@ -432,4 +514,22 @@ export const debug = {
   todayKey,
   elapsed: elapsedMs,
   home: () => { location.hash = '#/'; },
+  setPaused,
+  // 给帧率对拍/无头复验读的只读快照：任何量具读不到状态就等于没测（简报 §3 最后一条）。
+  probe: () => ({
+    phase: S.kind ? ($('#play').hidden ? 'result' : 'play') : 'home',
+    paused: !!S.paused,
+    running: !!(view && view.running),
+    frames: view ? view.frames : 0,
+    lastT: view ? view.lastT : 0,
+    winAt: view ? view.winAt : 0,
+    elapsedMs: elapsedMs(),
+    timerText: $('#play-timer') ? $('#play-timer').textContent : '',
+    hints: S.hints,
+    tool: S.tool,
+    sound: { want: !!store.settings.sound, ctx: soundState() },
+    reduceMotion: prefersReducedMotion(),
+    fullscreen: isFullscreen(),
+    stats: S.engine ? S.engine.stats() : null,
+  }),
 };

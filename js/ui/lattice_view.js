@@ -5,7 +5,7 @@
 // 引擎因此仍然只吃整数坐标，键盘光标、鼠标点击、手指拖拽走同一条路径 ——
 // 这也是无头复验能用真指针事件一路画完一条环的原因。
 
-import { store } from '../core/storage.js';
+import { prefersReducedMotion } from '../core/storage.js';
 
 const PAD = 10;
 // 点距下限：环类玩法的可点目标是"一条边的中点附近"，实际命中带只有半个格。
@@ -29,15 +29,33 @@ export class LatticeView {
     this.onInput = null;
     this.onFrame = null;
     this.onWin = null;
+    this.paused = false;
+    this.frames = 0;
+    this.lastT = 0;
 
     const opt = { passive: false };
-    canvas.addEventListener('pointerdown', (e) => this.down(e), opt);
-    canvas.addEventListener('pointermove', (e) => this.move(e), opt);
-    canvas.addEventListener('pointerup', (e) => this.up(e), opt);
-    canvas.addEventListener('pointercancel', (e) => this.up(e), opt);
-    canvas.addEventListener('pointerleave', () => { this.hover = null; });
+    // pointerdown 优先；老 Safari/微信内置浏览器没有 PointerEvent 时回落 touch*，
+    // 再兜一层 mouse*（桌面无触摸的旧内核）。三条路都汇到同一个 down/move/up，
+    // 坐标一律走 halfAt() 的 getBoundingClientRect 换算，所以缩放后点 A 就是打 A。
+    if (typeof window !== 'undefined' && window.PointerEvent) {
+      canvas.addEventListener('pointerdown', (e) => this.down(e), opt);
+      canvas.addEventListener('pointermove', (e) => this.move(e), opt);
+      canvas.addEventListener('pointerup', (e) => this.up(e), opt);
+      canvas.addEventListener('pointercancel', (e) => this.up(e), opt);
+      canvas.addEventListener('pointerleave', () => { this.hover = null; });
+    } else {
+      const first = (e) => (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+      canvas.addEventListener('touchstart', (e) => { e.preventDefault(); this.down(first(e)); }, opt);
+      canvas.addEventListener('touchmove', (e) => { e.preventDefault(); this.move(first(e)); }, opt);
+      canvas.addEventListener('touchend', (e) => { e.preventDefault(); this.up(first(e)); }, opt);
+      canvas.addEventListener('touchcancel', () => this.up(), opt);
+      canvas.addEventListener('mousedown', (e) => this.down(e));
+      canvas.addEventListener('mousemove', (e) => this.move(e));
+      canvas.addEventListener('mouseup', () => this.up());
+      canvas.addEventListener('mouseleave', () => { this.hover = null; });
+    }
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    new ResizeObserver(() => this.layout()).observe(wrap);
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this.layout()).observe(wrap);
   }
 
   attach(engine) {
@@ -77,7 +95,7 @@ export class LatticeView {
       rows: b.rows,
       w, h, dpr,
       hover: null,
-      reduce: !!store.settings.reduceMotion,
+      reduce: prefersReducedMotion(),
     };
   }
 
@@ -87,14 +105,19 @@ export class LatticeView {
     const v = this.view;
     if (!v) return null;
     const r = this.canvas.getBoundingClientRect();
-    const x = Math.floor((ev.clientX - r.left - v.ox) / v.sub);
-    const y = Math.floor((ev.clientY - r.top - v.oy) / v.sub);
+    // rect 是"屏幕上真正多大"，style.width 是"布局上多大" —— 两者不等就是被缩放了
+    // （祖先 transform、页面缩放、以后给画布加 max-width 都会）。只减 r.left 不除比例，
+    // 在缩放下会整体偏移命中框：手机上就是"点这条边，落在那条边"。
+    const sx = (r.width && v.w) ? r.width / v.w : 1;
+    const sy = (r.height && v.h) ? r.height / v.h : 1;
+    const x = Math.floor((ev.clientX - r.left - v.ox * sx) / (v.sub * sx));
+    const y = Math.floor((ev.clientY - r.top - v.oy * sy) / (v.sub * sy));
     return { x, y };
   }
 
   down(ev) {
     const e = this.engine;
-    if (!e || !this.view) return;
+    if (!e || !this.view || this.paused) return;
     const c = this.halfAt(ev);
     if (!c) return;
     ev.preventDefault();
@@ -110,7 +133,7 @@ export class LatticeView {
 
   move(ev) {
     const e = this.engine;
-    if (!e || !this.view) return;
+    if (!e || !this.view || this.paused) return;
     const c = this.halfAt(ev);
     this.hover = c;
     this.view.hover = c;
@@ -156,7 +179,7 @@ export class LatticeView {
 
   nudge(dx, dy) {
     const v = this.view;
-    if (!v) return;
+    if (!v || this.paused) return;
     const step = (this.engine && this.engine.step) || 1;
     const cur = this.hover || this.home();
     // 上界必须仍是该玩法的目标：格心玩法最右一格是 2*(cols-1)+1，夹到 2*cols 会停在边上
@@ -169,7 +192,7 @@ export class LatticeView {
   }
 
   press(cursor = false) {
-    if (!this.engine || !this.view) return;
+    if (!this.engine || !this.view || this.paused) return;
     const c = cursor ? (this.hover || this.home()) : this.hover;
     if (!c) return;
     this.view.hover = c;
@@ -183,6 +206,8 @@ export class LatticeView {
     this.running = true;
     const tick = (t) => {
       if (!this.running) return;
+      this.frames++;
+      this.lastT = t;
       this.render(t);
       if (this.onFrame) this.onFrame(t);
       this.frame = requestAnimationFrame(tick);
@@ -194,6 +219,20 @@ export class LatticeView {
     this.running = false;
     if (this.frame) cancelAnimationFrame(this.frame);
     this.frame = null;
+  }
+
+  // 暂停 = 停掉整条 rAF 回路 + 拒收输入。渲染一帧都不推，仿真自然也不推；
+  // 恢复时从当前 engine 状态重画，不丢任何一笔。
+  setPaused(on) {
+    this.paused = !!on;
+    if (this.paused) {
+      this.dragging = false;
+      this.lastHalf = null;
+      this.stop();
+    } else {
+      this.start();
+    }
+    return this.paused;
   }
 
   render(t) {

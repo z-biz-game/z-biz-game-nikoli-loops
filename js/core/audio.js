@@ -7,8 +7,11 @@ let ctx = null;
 let master = null;
 
 function ensure() {
-  if (ctx) return ctx;
+  // 静音判定必须在"复用已有上下文"之前：写成 if (ctx) return ctx 打头，
+  // 一旦上下文建起来，静音态照样每步新建振荡器（还会顺手把 suspended 的它 resume 回去），
+  // 那就是标准的假静音 —— 听不见，但节点在长、电在耗。
   if (!store.settings.sound) return null;
+  if (ctx) return ctx;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
   ctx = new AC();
@@ -70,4 +73,33 @@ export const sfx = {
 
 export function haptic(ms = 8) {
   if (navigator.vibrate && store.settings.sound) navigator.vibrate(ms);
+}
+
+// 真静音：把 AudioContext 挂起，而不是把 master gain 设成 0。
+// gain=0 的上下文仍在跑、仍在按节拍消耗资源，且新落的音仍会创建振荡器节点（只是听不见），
+// 断电式静音才是"节点不再增加"。ensure() 在 sound=false 时直接返回 null，
+// 所以静音期间根本不会有新振荡器；这里负责把已经活着的那个停下来。
+export function applySound(on) {
+  if (!ctx) return 'idle';               // 还没建过上下文：没什么可停的
+  const want = on ? 'running' : 'suspended';
+  if (ctx.state !== want) {
+    const p = ctx[on ? 'resume' : 'suspend']();
+    if (p && p.catch) p.catch(() => { /* 手势之外调用被拒：状态下一拍自然修正 */ });
+  }
+  return ctx.state;
+}
+
+export function soundState() {
+  return ctx ? ctx.state : 'idle';
+}
+
+// 静音态的统一入口：写盘 + 挂起上下文，两件事必须一起做（只做一件就是假静音）。
+export function isMuted() {
+  return !store.settings.sound;
+}
+
+export function toggleMuted() {
+  store.set('sound', isMuted());
+  applySound(!isMuted());
+  return isMuted();
 }

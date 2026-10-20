@@ -30,12 +30,17 @@ body {
   font-family: var(--font);
   color: var(--ink);
   background-color: var(--paper);
-  /* 方格纸底纹：细格 12px、粗格 60px，与棋盘格线同一套语汇 */
+  /* 方格纸底纹：细格 12px、粗格 60px，与棋盘格线同一套语汇。
+     最底下垫一层真纸纹（assets/gen/gen_art.mjs 生成的 256² 可平铺和纸纤维）——
+     渐变层是半透明的，所以垫在下面才看得见；顺序写反会把格线糊死。 */
   background-image:
     repeating-linear-gradient(to right, rgba(154, 147, 127, .16) 0 1px, transparent 1px 12px),
     repeating-linear-gradient(to bottom, rgba(154, 147, 127, .16) 0 1px, transparent 1px 12px),
     repeating-linear-gradient(to right, rgba(154, 147, 127, .26) 0 1px, transparent 1px 60px),
-    repeating-linear-gradient(to bottom, rgba(154, 147, 127, .26) 0 1px, transparent 1px 60px);
+    repeating-linear-gradient(to bottom, rgba(154, 147, 127, .26) 0 1px, transparent 1px 60px),
+    url("../assets/img/paper-grain.png");
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat;
+  background-size: auto, auto, auto, auto, 256px 256px;
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: manipulation;
@@ -46,7 +51,9 @@ body {
 /* ── 顶栏 ───────────────────────────────────────────── */
 #topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px)
+           calc(14px + env(safe-area-inset-right, 0px))
+           10px calc(14px + env(safe-area-inset-left, 0px));
   gap: 10px;
 }
 .brand { display: flex; align-items: center; gap: 9px; background: none; border: 0; padding: 2px 4px; cursor: pointer; color: inherit; font-family: inherit; }
@@ -60,10 +67,13 @@ body {
   border: 1px solid var(--rule); border-radius: 999px; padding: 4px 10px; white-space: nowrap;
 }
 .icon {
-  width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--rule);
-  background: var(--card); color: var(--ink-soft); font-size: 15px; cursor: pointer;
+  /* 44×44 是手指的下限，不是审美选择 —— 原来 34px 在 iPhone 上按不中隔壁就是静音 */
+  width: 44px; height: 44px; min-width: 44px; min-height: 44px; border-radius: 50%;
+  border: 1px solid var(--rule);
+  background: var(--card); color: var(--ink-soft); font-size: 17px; cursor: pointer;
   display: grid; place-items: center; transition: transform .12s ease, color .12s ease;
 }
+.icon[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 .icon:active { transform: scale(.92); }
 .icon.off { color: var(--ink-faint); text-decoration: line-through; }
 
@@ -71,7 +81,11 @@ body {
 #stage { flex: 1; min-height: 0; position: relative; }
 .screen { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
 .screen[hidden] { display: none; }
-.scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 14px calc(20px + var(--safe-b)); display: flex; flex-direction: column; gap: 14px; }
+.scroll {
+  overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 14px;
+  padding: 4px calc(14px + env(safe-area-inset-right, 0px)) calc(20px + var(--safe-b))
+           calc(14px + env(safe-area-inset-left, 0px));
+}
 
 .card {
   background: var(--card); border: 1px solid var(--rule); border-radius: var(--r);
@@ -122,22 +136,29 @@ p { margin: 0; }
 .kind-best { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
 .kind-sizes { display: flex; flex-wrap: wrap; gap: 4px; }
 .size-chip {
+  /* 档位芯片的可视高度小，但命中框用 padding + min-height 撑到 44 —— 视觉与手指各要各的 */
   font-family: var(--mono); font-size: 11px; padding: 3px 7px; border-radius: 7px;
+  min-height: 44px;
   border: 1px solid var(--rule); background: var(--paper); cursor: pointer; color: var(--ink-soft);
 }
 .size-chip:hover { border-color: var(--accent); color: var(--accent); }
-.kind-help { position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; border-radius: 50%;
-  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-faint); font-size: 12px; cursor: pointer; }
+.kind-help { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-faint); font-size: 13px; cursor: pointer; }
 .kind-help:hover { color: var(--accent); border-color: var(--accent); }
 
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; gap: 6px; }
 .stat b { display: block; font-size: 20px; font-family: var(--mono); color: var(--accent); }
 .stat span { font-size: 11px; color: var(--ink-soft); }
-.textlink { background: none; border: 0; color: var(--ink-soft); font-family: inherit; font-size: 13px; text-align: center; cursor: pointer; padding: 4px; }
+.textlink { background: none; border: 0; color: var(--ink-soft); font-family: inherit; font-size: 13px; text-align: center; cursor: pointer; padding: 12px 4px; min-height: 44px; }
 .textlink:hover { color: var(--accent); }
 
 /* ── 对局 ───────────────────────────────────────────── */
-#play { padding: 0 10px calc(10px + var(--safe-b)); gap: 8px; }
+#play {
+  padding: 0 calc(10px + env(safe-area-inset-right, 0px)) calc(10px + var(--safe-b))
+           calc(10px + env(safe-area-inset-left, 0px));
+  gap: 8px;
+}
 .playbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 2px 0; }
 .playbar-title { display: flex; align-items: baseline; gap: 8px; }
 .playbar-title b { font-size: 17px; letter-spacing: .05em; }
@@ -146,10 +167,21 @@ p { margin: 0; }
 
 #board-wrap {
   position: relative; flex: 1; min-height: 0; display: grid; place-items: center;
-  border: 1px solid var(--rule); border-radius: var(--r); background: var(--paper-deep);
+  border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden;
+  /* 画布只画格线与墨迹（clearRect 之后是透明的），所以"纸"必须由这一层给 —— */
+  background-color: var(--paper-deep);
+  background-image: url("../assets/img/paper-grain.png");
+  background-size: 256px 256px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.6);
-  overflow: hidden;
 }
+.veil {
+  position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px; cursor: pointer;
+  background: rgba(244, 239, 227, .82); backdrop-filter: blur(2px);
+  border-radius: var(--r); text-align: center; padding: 0 18px;
+}
+.veil b { font-size: 21px; letter-spacing: .1em; color: var(--ink); }
+.veil[hidden] { display: none; }
 #board { display: block; touch-action: none; cursor: crosshair; border-radius: var(--r); }
 
 .flash {
@@ -168,7 +200,8 @@ p { margin: 0; }
 .spacer { flex: 1; }
 .ctl {
   font-family: inherit; font-size: 13px; color: var(--ink); background: var(--card);
-  border: 1px solid var(--rule); border-radius: 10px; padding: 9px 12px; min-width: 44px; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: 10px; padding: 9px 12px;
+  min-width: 44px; min-height: 44px; cursor: pointer;
   box-shadow: 0 1px 0 rgba(43,42,38,.06); transition: transform .1s ease, opacity .12s ease;
 }
 .ctl:active { transform: translateY(1px); }
@@ -178,16 +211,16 @@ p { margin: 0; }
 
 .tool-toggle { display: flex; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--paper); }
 .tool-toggle[hidden] { display: none; }
-.tool-toggle button { font-family: inherit; font-size: 12.5px; border: 0; background: none; color: var(--ink-soft); padding: 9px 12px; cursor: pointer; }
+.tool-toggle button { font-family: inherit; font-size: 12.5px; border: 0; background: none; color: var(--ink-soft); padding: 9px 12px; min-height: 44px; cursor: pointer; }
 .tool-toggle button.on { background: var(--ink); color: var(--paper); }
 .hint-note { font-size: 11.5px; color: var(--gold); min-height: 1.3em; margin: -2px 2px 0; }
 
-.ghost { background: none; border: 1px solid var(--rule); border-radius: 9px; padding: 8px 11px; font-family: inherit; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
+.ghost { background: none; border: 1px solid var(--rule); border-radius: 9px; padding: 8px 11px; min-height: 44px; font-family: inherit; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
 .ghost:hover { color: var(--ink); border-color: var(--rule-bold); }
 .ghost.danger { color: var(--warn); border-color: rgba(180, 82, 47, .4); }
 .primary {
   background: var(--ink); color: var(--paper); border: 0; border-radius: 10px; padding: 11px 16px;
-  font-family: inherit; font-size: 14.5px; letter-spacing: .04em; cursor: pointer; box-shadow: var(--shadow);
+  font-family: inherit; font-size: 14.5px; letter-spacing: .04em; cursor: pointer; min-height: 44px; box-shadow: var(--shadow);
 }
 .primary:hover { background: #1d1c19; }
 
@@ -240,8 +273,17 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
   }
 }
 
+/* 系统级"减弱动效"：位移/缩放/涟漪全部撤掉（不是把时长压成 0 —— 那还是会闪一下）。
+   画布内的粒子与呼吸由 js 的 matchMedia 分支负责（见 app.js 的 prefersReducedMotion）。 */
 @media (prefers-reduced-motion: reduce) {
-  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; scroll-behavior: auto !important;
+  }
+  .icon:active, .kind:hover, .daily-cell:hover { transform: none; }
+  .flash { display: none; }
+  .toast { transition: none; }
+  .progress i { transition: none; }
 }
 
 /* 中央分发：safe-area 兜底 */
