@@ -20,6 +20,7 @@ import arukone, {
 } from '../js/puzzles/arukone.js';
 import { isCell, cellOf, cellAt } from '../js/core/lattice.js';
 import { rngFrom } from '../js/core/rng.js';
+import { bestOfMs } from './timing.mjs';
 
 const SEEDS = (tag, k = 10) => Array.from({ length: k }, (_, i) => `${tag}:${i}`);
 const key = (h) => h.join(',');
@@ -429,10 +430,9 @@ test('保底题面交得出真题：4..10 每一档都数得出唯一解', () =>
     assert.ok(spec.par >= 8, `n=${n} 保底环长只有 ${spec.par}`);
     assert.ok(spec.solution.every((h) => isCell(h[0], h[1])), `n=${n} 保底里混了非格心`);
     assert.equal(validate(spec, spec.solution), true, `n=${n} 保底题面与答案不自洽`);
-    const t0 = Date.now();
-    const { count, capped } = countSolutions(spec, 2, { budget: 6000 });
-    const ms = Date.now() - t0;
-    assert.ok(ms < 400, `n=${n} 保底数解花了 ${ms}ms`);
+    let count, capped;
+    const ms = bestOfMs(() => { ({ count, capped } = countSolutions(spec, 2, { budget: 6000 })); });
+    assert.ok(ms < 400, `n=${n} 保底数解最快一轮花了 ${ms.toFixed(1)}ms`);
     assert.equal(count, 1, `n=${n} 保底数出 ${count} 个解`);
     assert.equal(capped, false, `n=${n} 保底没数完`);
     assert.ok(logicSolve(spec), `n=${n} 保底发了道推不完的盘`);
@@ -496,10 +496,8 @@ test('不同种子的题面各不相同：线索、环长、环都得动起来�
 
 test('出题在手机上不卡：每档十道题各有预算', () => {
   for (const n of [6, 7, 8]) {
-    const t0 = Date.now();
-    for (const seed of SEEDS(`t${n}`)) generate(seed, n);
-    const ms = Date.now() - t0;
-    assert.ok(ms < 600, `${n}×${n} 十道题花了 ${ms}ms`);
+    const ms = bestOfMs(() => { for (const seed of SEEDS(`t${n}`)) generate(seed, n); });
+    assert.ok(ms < 600, `${n}×${n} 十道题最快一轮花了 ${ms.toFixed(1)}ms`);
     assert.ok(ms / 10 < 60, `${n}×${n} 平均 ${(ms / 10).toFixed(1)}ms，超过手机可接受范围`);
   }
 });

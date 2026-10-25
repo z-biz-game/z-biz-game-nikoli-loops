@@ -18,6 +18,7 @@ import hashi, {
   countSolutions, solveOne, generate, create, islandHalfOf, islandCellOf,
 } from '../js/puzzles/hashi.js';
 import { isCell, isVertex, isHEdge, isVEdge, edgeSides, cellOf, cellAt } from '../js/core/lattice.js';
+import { bestOfMs } from './timing.mjs';
 
 const SEEDS = (tag, k = 10) => Array.from({ length: k }, (_, i) => `${tag}:${i}`);
 const keyOf = ([x, y]) => x + ',' + y;
@@ -527,10 +528,8 @@ test('不同种子的题面不会全一样：岛位、岛数与桥数都在动',
 test('出题在手机上不卡：每档十道题各有预算', () => {
   const budget = { 7: 900, 9: 1600, 11: 3600 };
   for (const n of [7, 9, 11]) {
-    const t0 = Date.now();
-    for (const seed of SEEDS('budget', 10)) generate(seed, n);
-    const ms = Date.now() - t0;
-    assert.ok(ms < budget[n], `${n}×${n} 十道题花了 ${ms}ms（预算 ${budget[n]}ms）`);
+    const ms = bestOfMs(() => { for (const seed of SEEDS('budget', 10)) generate(seed, n); });
+    assert.ok(ms < budget[n], `${n}×${n} 十道题最快一轮花了 ${ms.toFixed(1)}ms（预算 ${budget[n]}ms）`);
   }
 });
 

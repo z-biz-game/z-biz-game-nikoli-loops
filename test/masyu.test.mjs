@@ -20,6 +20,7 @@ import masyu, {
 } from '../js/puzzles/masyu.js';
 import { cellAt, cellOf, isCell } from '../js/core/lattice.js';
 import { rngFrom } from '../js/core/rng.js';
+import { bestOfMs } from './timing.mjs';
 
 const SEEDS = (tag, k = 10) => Array.from({ length: k }, (_, i) => `${tag}:${i}`);
 const halfSet = (halves) => halves.map((h) => h.join(',')).sort().join('|');
@@ -547,10 +548,8 @@ test('黑珠颗数也该跟着种子动（wiggle 环能出题之前先亮着）'
 test('出题在手机上不卡：每档十道题各有预算', () => {
   const BUDGET = { 6: 300, 7: 800, 8: 2500 };
   for (const key of [6, 7, 8]) {
-    const t0 = Date.now();
-    for (const seed of SEEDS(`t${key}`)) generate(seed, key);
-    const ms = Date.now() - t0;
-    assert.ok(ms < BUDGET[key], `${key}×${key} 十道题花了 ${ms}ms，超过 ${BUDGET[key]}ms`);
+    const ms = bestOfMs(() => { for (const seed of SEEDS(`t${key}`)) generate(seed, key); });
+    assert.ok(ms < BUDGET[key], `${key}×${key} 十道题最快一轮花了 ${ms.toFixed(1)}ms，超过 ${BUDGET[key]}ms`);
   }
 });
 

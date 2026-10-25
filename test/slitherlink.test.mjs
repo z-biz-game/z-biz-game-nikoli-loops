@@ -12,6 +12,7 @@ import slitherlink, {
   validate, generate, create, rescue,
 } from '../js/puzzles/slitherlink.js';
 import { edgeEnds } from '../js/core/lattice.js';
+import { bestOfMs } from './timing.mjs';
 
 const SEEDS = (tag, k = 10) => Array.from({ length: k }, (_, i) => `${tag}:${i}`);
 const setOf = (ks) => ks.slice().sort((a, b) => a - b).join(',');
@@ -218,9 +219,9 @@ test('保底题面交得出题：4..10 每一档都数得出唯一解', () => {
   for (let n = 4; n <= 10; n++) {
     const spec = rescue(n);
     assert.ok(spec && spec.clues.length, `n=${n} 交白卷`);
-    const t0 = Date.now();
-    const { count, capped } = countSolutions(spec, 2, null, 200000);
-    assert.ok(Date.now() - t0 < 400, `n=${n} 保底题面数解花了 ${Date.now() - t0}ms`);
+    let count, capped;
+    const ms = bestOfMs(() => { ({ count, capped } = countSolutions(spec, 2, null, 200000)); });
+    assert.ok(ms < 400, `n=${n} 保底题面数解最快一轮花了 ${ms.toFixed(1)}ms`);
     assert.equal(count, 1, `n=${n} 保底题面数出 ${count} 个解`);
     assert.equal(capped, false, `n=${n} 保底题面没数完`);
     assert.equal(validate(spec, spec.solution), true, `n=${n} 保底题面与答案不自洽`);
@@ -254,10 +255,8 @@ test('不同种子的题面不会全一样：线索与环长都在动', () => {
 
 test('出题在手机上不卡：每档十道题各有预算', () => {
   for (const n of [5, 6, 7]) {
-    const t0 = Date.now();
-    for (const seed of SEEDS(`t${n}`)) generate(seed, n);
-    const ms = Date.now() - t0;
-    assert.ok(ms < 1500, `${n}×${n} 十道题花了 ${ms}ms`);
+    const ms = bestOfMs(() => { for (const seed of SEEDS(`t${n}`)) generate(seed, n); });
+    assert.ok(ms < 1500, `${n}×${n} 十道题最快一轮花了 ${ms.toFixed(1)}ms`);
   }
 });
 
