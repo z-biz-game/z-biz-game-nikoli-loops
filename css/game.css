@@ -182,7 +182,7 @@ p { margin: 0; }
 }
 .veil b { font-size: 21px; letter-spacing: .1em; color: var(--ink); }
 .veil[hidden] { display: none; }
-#board { display: block; touch-action: none; cursor: crosshair; border-radius: var(--r); }
+#board { display: block; touch-action: pinch-zoom; cursor: crosshair; border-radius: var(--r); }
 
 .flash {
   position: absolute; inset: 0; pointer-events: none; border-radius: var(--r);
@@ -308,4 +308,10 @@ body {
 /* 贴边的固定/吸底元素自己让开主屏条，别让 home indicator 压住按钮 */
 .fixed-bottom, .bottom-bar, .hud-bottom, footer.app-footer {
   padding-bottom: calc(var(--sab) + env(safe-area-inset-bottom, 0px));
+}
+
+/* 键盘焦点必须可见：触屏用户看不到 hover，键盘/辅助技术用户看不到 outline 就等于丢焦点 */
+button:focus-visible, a:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }
